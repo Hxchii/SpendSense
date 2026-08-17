@@ -47,7 +47,10 @@ class HttpReceiptScanRepository implements ReceiptScanRepository {
     final bytes = await _readImage(imagePath);
 
     final categories = await loadCategories();
-    final expenseCategories = categories.where((c) => c.type != CategoryType.income).toList();
+    // Savings is reserved for goal contributions — nothing bought at a shop
+    // belongs in it, so it never goes on the menu the model picks from.
+    final expenseCategories =
+        categories.where((c) => c.type != CategoryType.income && c.id != SeedIds.catSavings).toList();
     final categoryLines = expenseCategories.map((c) => '- ${c.id} → ${c.name}').join('\n');
     final allowedIds = expenseCategories.map((c) => c.id).toList();
 

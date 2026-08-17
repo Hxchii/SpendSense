@@ -19,5 +19,9 @@ const List<Category> defaultCategories = [
   Category(id: SeedIds.catEntertainment, name: 'Entertainment', type: CategoryType.expense, iconKey: 'entertainment', colorHex: '#e87ba4', isDefault: true),
   Category(id: SeedIds.catHealth, name: 'Health', type: CategoryType.expense, iconKey: 'health', colorHex: '#008300', isDefault: true),
   Category(id: SeedIds.catEducation, name: 'Education', type: CategoryType.expense, iconKey: 'education', colorHex: '#4a3aa7', isDefault: true),
+  // Money moved into a savings goal is an outflow from a wallet, but it isn't
+  // spending — keeping it out of "Other" stops goal contributions from
+  // silently eating an unrelated budget.
+  Category(id: SeedIds.catSavings, name: 'Savings', type: CategoryType.expense, iconKey: 'piggyBank', colorHex: '#1baf7a', isDefault: true),
   Category(id: SeedIds.catOther, name: 'Other', type: CategoryType.expense, iconKey: 'other', colorHex: '#e34948', isDefault: true),
 ];

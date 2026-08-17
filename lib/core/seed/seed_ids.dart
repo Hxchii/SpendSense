@@ -17,6 +17,7 @@ class SeedIds {
   static const catEntertainment = 'cat-entertainment';
   static const catHealth = 'cat-health';
   static const catEducation = 'cat-education';
+  static const catSavings = 'cat-savings';
   static const catOther = 'cat-other';
 
   static const goalEmergencyFund = 'goal-emergency-fund';

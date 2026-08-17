@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/seed/seed_ids.dart';
 import 'package:spendsense/core/services/notification_service.dart';
 import 'package:spendsense/core/utils/id.dart';
 import 'package:spendsense/core/utils/iterable_extensions.dart';
@@ -145,11 +146,18 @@ class SavingsGoalContributionController {
     required DateTime? nextContributionDate,
   }) async {
     final goalRepo = _ref.read(savingsGoalRepositoryProvider);
-    final categories = await _ref.read(categoryRepositoryProvider).watchAll(type: CategoryType.expense).first;
-    final category = categories.firstWhereOrNull((c) => c.name.toLowerCase() == 'other') ?? categories.first;
+    final categories =
+        await _ref.read(categoryRepositoryProvider).watchAll(type: CategoryType.expense, includeArchived: true).first;
+    // Falls back by id first, then by name, so an account created before the
+    // Savings category existed still resolves something sensible.
+    final categoryId = categories.firstWhereOrNull((c) => c.id == SeedIds.catSavings)?.id ??
+        categories.firstWhereOrNull((c) => c.name.toLowerCase() == 'savings')?.id ??
+        categories.firstWhereOrNull((c) => c.id == SeedIds.catOther)?.id ??
+        categories.firstOrNull?.id;
+    if (categoryId == null) return;
     final transaction = await _ref.read(transactionRepositoryProvider).create(TransactionDraft(
           walletId: walletId,
-          categoryId: category.id,
+          categoryId: categoryId,
           type: TransactionType.expense,
           amount: amount,
           date: DateTime.now(),
