@@ -1,0 +1,24 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "spendsense-dca63",
+          "appId": "1:366815191286:android:cd0f4c97f6647b9e8dccd7",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "spendsense-dca63",
+          "configurations": {
+            "android": "1:366815191286:android:cd0f4c97f6647b9e8dccd7"
+          }
+        }
+      }
+    }
+  }
+}

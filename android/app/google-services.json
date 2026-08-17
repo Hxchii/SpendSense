@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "366815191286",
+    "project_id": "spendsense-dca63",
+    "storage_bucket": "spendsense-dca63.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:366815191286:android:cd0f4c97f6647b9e8dccd7",
+        "android_client_info": {
+          "package_name": "com.spendsense.spendsense"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7Ahmao-WPueORtQ56fhs5-FNujF3LOD0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
