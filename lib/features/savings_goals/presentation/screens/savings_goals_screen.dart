@@ -175,8 +175,11 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.textMuted),
               ),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            // Wrap, not Row: both labels together overflow a 360dp screen
+            // once the goal has a contribution to undo.
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 4,
               children: [
                 if (goal.canUndoLastContribution)
                   TextButton(
@@ -184,7 +187,7 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
                         ? null
                         : () => _runGuarded(() => ref.read(savingsGoalContributionControllerProvider).undoLastContribution(goal.id)),
                     style: TextButton.styleFrom(foregroundColor: colors.textMuted),
-                    child: const Text('Undo last contribution'),
+                    child: const Text('Undo last'),
                   ),
                 TextButton(
                   onPressed: _processing ? null : () => _runGuarded(widget.onAddContribution),

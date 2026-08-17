@@ -15,6 +15,7 @@ import 'package:spendsense/features/budgets/application/budget_providers.dart';
 import 'package:spendsense/features/categories/application/category_providers.dart';
 import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
 import 'package:spendsense/features/recurring_bills/application/recurring_bill_providers.dart';
+import 'package:spendsense/features/recurring_bills/domain/entities/recurring_bill.dart';
 import 'package:spendsense/features/reminders/application/reminder_providers.dart';
 import 'package:spendsense/features/reminders/domain/entities/reminder.dart';
 import 'package:spendsense/features/savings_goals/application/savings_goal_providers.dart';
@@ -37,6 +38,28 @@ class DashboardScreen extends ConsumerWidget {
     ref.watch(dueGoalAutoContributionsSweepProvider);
     ref.watch(budgetAlertWatcherProvider);
     final colors = context.colors;
+
+    // Data comes off the network now, so "still loading" and "genuinely
+    // empty" have to look different — otherwise a user with a full account
+    // is told they have nothing every time they open the app, and a failed
+    // read is indistinguishable from a brand-new account.
+    final walletsAsync = ref.watch(walletListProvider);
+    final transactionsAsync = ref.watch(transactionListProvider(null));
+    if (walletsAsync.isLoading || transactionsAsync.isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final loadError = walletsAsync.error ?? transactionsAsync.error;
+    if (loadError != null) {
+      return Scaffold(
+        body: _DashboardError(
+          onRetry: () {
+            ref.invalidate(walletListProvider);
+            ref.invalidate(transactionListProvider(null));
+          },
+        ),
+      );
+    }
+
     final profile = ref.watch(userProfileProvider).valueOrNull;
     final wallets =
         ref.watch(walletListProvider).valueOrNull ?? const <Wallet>[];
@@ -49,6 +72,10 @@ class DashboardScreen extends ConsumerWidget {
     final categories = ref.watch(categoryListProvider).valueOrNull ?? const [];
     final currency = profile?.currencySymbol ?? '₱';
     final dueSoonBill = bills
+        // Completed/paused bills keep their last due date, so without the
+        // status filter a finished installment plan sits on the dashboard
+        // forever reading "due in -47 days".
+        .where((b) => b.status == BillStatus.active)
         .where((b) => b.daysUntilDue <= b.reminderDaysBefore)
         .sorted((a, b) => a.daysUntilDue.compareTo(b.daysUntilDue))
         .firstOrNull;
@@ -79,7 +106,13 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       // AppShell's own SafeArea already clears the floating nav bar.
       body: RefreshIndicator(
-        onRefresh: () async {},
+        onRefresh: () async {
+          ref.invalidate(walletListProvider);
+          ref.invalidate(transactionListProvider(null));
+          ref.invalidate(budgetListProvider);
+          ref.invalidate(recurringBillListProvider);
+          ref.invalidate(savingsGoalListProvider);
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           children: [
@@ -325,26 +358,32 @@ class _BalanceHero extends StatelessWidget {
             color: colors.paper,
           ),
           const SizedBox(height: 20),
+          // Flexible, not fixed: six- and seven-figure amounts overflow this
+          // row on a normal phone otherwise.
           Row(
             children: [
-              _HeroStat(
-                icon: LucideIcons.arrowDown,
-                label: 'Income',
-                amount: monthIncome,
-                currency: currency,
-                colors: colors,
-                positive: true,
+              Flexible(
+                child: _HeroStat(
+                  icon: LucideIcons.arrowDown,
+                  label: 'Income',
+                  amount: monthIncome,
+                  currency: currency,
+                  colors: colors,
+                  positive: true,
+                ),
               ),
-              const SizedBox(width: 24),
-              _HeroStat(
-                icon: LucideIcons.arrowUp,
-                label: 'Expenses',
-                amount: monthExpense,
-                currency: currency,
-                colors: colors,
-                positive: false,
+              const SizedBox(width: 16),
+              Flexible(
+                child: _HeroStat(
+                  icon: LucideIcons.arrowUp,
+                  label: 'Expenses',
+                  amount: monthExpense,
+                  currency: currency,
+                  colors: colors,
+                  positive: false,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -413,6 +452,8 @@ class _HeroStat extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           amount.format(currency),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: colors.paper,
             fontSize: 15,
@@ -590,4 +631,35 @@ class _InlineHint extends StatelessWidget {
 
 extension _SortedList<T> on Iterable<T> {
   List<T> sorted(int Function(T a, T b) compare) => toList()..sort(compare);
+}
+
+class _DashboardError extends StatelessWidget {
+  const _DashboardError({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.cloudOff, size: 44, color: colors.textMuted),
+            const SizedBox(height: 16),
+            Text("Couldn't load your data", style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'Check your connection and try again. Nothing has been lost.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: colors.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
 }

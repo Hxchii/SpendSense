@@ -27,6 +27,11 @@ final localAuthProvider = Provider<LocalAuthentication>((ref) => LocalAuthentica
 /// lock and this is false.
 final appUnlockedProvider = StateProvider<bool>((ref) => false);
 
+/// True while the OS biometric prompt is on screen. That prompt backgrounds
+/// the app on some devices, which would otherwise trip the lifecycle re-lock
+/// in main.dart and bounce the user between prompt and lock screen forever.
+final biometricPromptActiveProvider = StateProvider<bool>((ref) => false);
+
 Future<bool> tryBiometricUnlock(LocalAuthentication auth) async {
   try {
     final canCheck = await auth.canCheckBiometrics || await auth.isDeviceSupported();

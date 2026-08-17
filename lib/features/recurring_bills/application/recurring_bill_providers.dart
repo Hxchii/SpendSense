@@ -39,35 +39,49 @@ class RecurringBillPaymentController {
   RecurringBillPaymentController(this._ref);
   final Ref _ref;
 
+  static bool _isSameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+
   Future<RecurringBill?> _billById(String id) async {
     final bills = await _ref.read(recurringBillRepositoryProvider).watchAll().first;
     return bills.firstWhereOrNull((b) => b.id == id);
   }
 
-  Future<void> payBill(String id) async {
+  /// [onlyIfDueOn] guards the sweep against paying a bill the user already
+  /// paid manually in the window between the sweep reading the bill list and
+  /// getting here — without it, both paths charge and the bill jumps two
+  /// periods ahead.
+  Future<void> payBill(String id, {DateTime? onlyIfDueOn}) async {
     final billRepo = _ref.read(recurringBillRepositoryProvider);
     final bill = await _billById(id);
     if (bill == null) return;
+    if (onlyIfDueOn != null && !_isSameDay(bill.nextDueDate, onlyIfDueOn)) return;
+
+    // Resolve the wallet BEFORE marking paid: marking first meant a bill with
+    // no usable wallet still advanced its due date and occurrence count while
+    // moving no money, and cleared its own undo state.
+    String? walletId;
+    if (bill.autoLogTransaction) {
+      final wallets = await _ref.read(walletRepositoryProvider).watchAll().first;
+      final explicit = wallets.firstWhereOrNull((w) => w.id == bill.walletId && !w.archived);
+      walletId = explicit?.id ?? wallets.firstWhereOrNull((w) => !w.archived)?.id;
+      if (walletId == null) return;
+    }
 
     final previousDueDate = bill.nextDueDate;
     final updated = await billRepo.markPaidNow(id);
 
     String? transactionId;
-    if (bill.autoLogTransaction) {
-      final wallets = await _ref.read(walletRepositoryProvider).watchAll().first;
-      final walletId = bill.walletId ?? wallets.firstWhereOrNull((w) => !w.archived)?.id;
-      if (walletId != null) {
-        final transaction = await _ref.read(transactionRepositoryProvider).create(TransactionDraft(
-              walletId: walletId,
-              categoryId: bill.categoryId,
-              type: TransactionType.expense,
-              amount: bill.amount,
-              date: DateTime.now(),
-              note: 'Auto-paid: ${bill.name}',
-              source: TransactionSource.recurring,
-            ));
-        transactionId = transaction.id;
-      }
+    if (walletId != null) {
+      final transaction = await _ref.read(transactionRepositoryProvider).create(TransactionDraft(
+            walletId: walletId,
+            categoryId: bill.categoryId,
+            type: TransactionType.expense,
+            amount: bill.amount,
+            date: DateTime.now(),
+            note: 'Auto-paid: ${bill.name}',
+            source: TransactionSource.recurring,
+          ));
+      transactionId = transaction.id;
     }
 
     await billRepo.update(updated.copyWith(
@@ -102,7 +116,7 @@ class RecurringBillPaymentController {
       if (bill.status != BillStatus.active) continue;
       final dueDate = DateTime(bill.nextDueDate.year, bill.nextDueDate.month, bill.nextDueDate.day);
       if (dueDate.isAfter(dueToday)) continue;
-      await payBill(bill.id);
+      await payBill(bill.id, onlyIfDueOn: bill.nextDueDate);
       if (notificationsOn) {
         await _ref.read(notificationServiceProvider).show(
               title: '"${bill.name}" auto-paid',

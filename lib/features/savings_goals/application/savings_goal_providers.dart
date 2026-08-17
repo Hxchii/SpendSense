@@ -28,13 +28,29 @@ final savingsGoalListProvider = StreamProvider.autoDispose<List<SavingsGoal>>((r
 DateTime _advanceReminderDate(DateTime from, GoalReminderFrequency frequency) {
   return frequency == GoalReminderFrequency.weekly
       ? from.add(const Duration(days: 7))
-      : DateTime(from.year, from.month + 1, from.day);
+      : _sameDayNextMonth(from);
+}
+
+/// Clamps to the last day of the target month — DateTime(y, 2, 31) rolls
+/// into March, which would walk a monthly schedule off its date permanently.
+DateTime _sameDayNextMonth(DateTime from) {
+  final year = from.month == 12 ? from.year + 1 : from.year;
+  final month = from.month == 12 ? 1 : from.month + 1;
+  final lastDay = DateTime(year, month + 1, 0).day;
+  return DateTime(year, month, from.day.clamp(1, lastDay));
 }
 
 /// One-shot per app session, same pattern as [dueRecurringBillsSweepProvider]
 /// — on first read (dashboard load), posts a contribution-nudge Reminder for
 /// every active goal whose reminder schedule has come due, then advances it.
 final dueGoalRemindersSweepProvider = FutureProvider<void>((ref) async {
+  // Runs AFTER the contribution sweep, never alongside it. Both write whole
+  // goal documents with set(), so overlapping them let the reminder's write
+  // clobber a contribution that had just been applied — reverting the goal's
+  // balance while leaving the expense transaction behind, and re-charging on
+  // the next launch because nextContributionDate went back too.
+  await ref.watch(dueGoalAutoContributionsSweepProvider.future);
+
   final goalRepo = ref.read(savingsGoalRepositoryProvider);
   final reminderRepo = ref.read(reminderRepositoryProvider);
   final currency = ref.read(userProfileProvider).valueOrNull?.currencySymbol ?? '₱';

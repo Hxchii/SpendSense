@@ -1,4 +1,7 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +15,11 @@ import 'package:spendsense/features/receipts/domain/entities/receipt.dart';
 import 'package:spendsense/features/transactions/application/transaction_providers.dart';
 import 'package:spendsense/features/transactions/domain/entities/transaction.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class ReceiptReviewScreen extends ConsumerStatefulWidget {
   const ReceiptReviewScreen({super.key, required this.scanResult, required this.imagePath});
@@ -44,43 +52,70 @@ class _ReceiptReviewScreenState extends ConsumerState<ReceiptReviewScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (_categoryId == null || _walletId == null) {
       showValidationSnackBar(context, 'Add a wallet and category before saving — you don\'t have any set up yet.');
       return;
     }
+    final total = Money.fromMajor(num.tryParse(_totalController.text.trim()) ?? 0);
+    if (total.minorUnits <= 0) {
+      showValidationSnackBar(context, 'Enter a valid total.');
+      return;
+    }
     setState(() => _saving = true);
 
-    final total = Money.fromMajor(num.tryParse(_totalController.text.trim()) ?? 0);
-    final txn = await ref.read(transactionRepositoryProvider).create(TransactionDraft(
-          walletId: _walletId!,
-          categoryId: _categoryId!,
-          type: TransactionType.expense,
-          amount: total,
-          date: widget.scanResult.date,
-          note: _merchantController.text.trim(),
-          source: TransactionSource.receipt,
-        ));
+    // Resolved up front: the chain below can outlive this screen once the
+    // write is queued, and ref is unusable after we pop.
+    final transactionRepo = ref.read(transactionRepositoryProvider);
+    final receiptRepo = ref.read(receiptRepositoryProvider);
 
-    await ref.read(receiptRepositoryProvider).save(Receipt(
-          id: newId(),
-          merchant: _merchantController.text.trim(),
-          date: widget.scanResult.date,
-          items: widget.scanResult.items,
-          subtotal: widget.scanResult.subtotal,
-          tax: widget.scanResult.tax,
-          discount: widget.scanResult.discount,
-          total: total,
-          suggestedCategoryId: _categoryId,
-          status: ReceiptStatus.confirmed,
-          duplicateOfReceiptId: widget.scanResult.duplicateOfReceiptId,
-          linkedTransactionId: txn.id,
-        ));
+    // The receipt carries the transaction's id, so both writes stay in one
+    // chain under a single timeout rather than racing each other.
+    Future<void> write() async {
+      final txn = await transactionRepo.create(TransactionDraft(
+            walletId: _walletId!,
+            categoryId: _categoryId!,
+            type: TransactionType.expense,
+            amount: total,
+            date: widget.scanResult.date,
+            note: _merchantController.text.trim(),
+            source: TransactionSource.receipt,
+          ));
 
-    // pop, not go('/receipts') — Review already sits directly on top of the
-    // existing Receipts screen (Scan replaced itself with Review via
-    // pushReplacement), so popping back to it keeps the back button intact
-    // instead of resetting the stack out from under it.
-    if (mounted) context.pop();
+      await receiptRepo.save(Receipt(
+            id: newId(),
+            merchant: _merchantController.text.trim(),
+            date: widget.scanResult.date,
+            items: widget.scanResult.items,
+            subtotal: widget.scanResult.subtotal,
+            tax: widget.scanResult.tax,
+            discount: widget.scanResult.discount,
+            total: total,
+            suggestedCategoryId: _categoryId,
+            status: ReceiptStatus.confirmed,
+            duplicateOfReceiptId: widget.scanResult.duplicateOfReceiptId,
+            linkedTransactionId: txn.id,
+          ));
+    }
+
+    try {
+      await write().timeout(_writeTimeout);
+      // pop, not go('/receipts') — Review already sits directly on top of the
+      // existing Receipts screen (Scan replaced itself with Review via
+      // pushReplacement), so popping back to it keeps the back button intact
+      // instead of resetting the stack out from under it.
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving receipt failed', error: e, stackTrace: stackTrace, name: 'ReceiptReviewScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override

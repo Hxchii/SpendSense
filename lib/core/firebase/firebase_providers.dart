@@ -16,7 +16,14 @@ final authStateProvider = StreamProvider<User?>((ref) {
 });
 
 final currentUidProvider = Provider<String?>((ref) {
-  return ref.watch(authStateProvider).valueOrNull?.uid;
+  // Watching the stream keeps this reactive to sign-out/sign-in, but its
+  // first event only arrives on a microtask — so a synchronous read during
+  // the first frame after startup would see null even though sign-in has
+  // already completed. Falling back to the synchronously-available
+  // currentUser closes that gap; without it the one-shot sweep providers
+  // read a null uid, cache an error, and (being non-autoDispose) never retry.
+  final fromStream = ref.watch(authStateProvider).valueOrNull;
+  return fromStream?.uid ?? ref.watch(firebaseAuthProvider).currentUser?.uid;
 });
 
 /// The uid, asserted to exist. Repository providers use this because the app

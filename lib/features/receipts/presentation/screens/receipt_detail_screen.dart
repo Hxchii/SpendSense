@@ -1,31 +1,63 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:spendsense/core/widgets/validation_snackbar.dart';
 import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
 import 'package:spendsense/features/receipts/application/receipt_providers.dart';
 import 'package:spendsense/features/receipts/domain/entities/receipt.dart';
 
-class ReceiptDetailScreen extends ConsumerWidget {
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the change is already durable in the local
+/// cache and syncs later, so past this point the delete counts as done.
+const _writeTimeout = Duration(seconds: 5);
+
+class ReceiptDetailScreen extends ConsumerStatefulWidget {
   const ReceiptDetailScreen({super.key, required this.receipt});
 
   final Receipt receipt;
 
-  Future<void> _delete(BuildContext context, WidgetRef ref) async {
-    await ref.read(receiptRepositoryProvider).delete(receipt.id);
-    if (context.mounted) context.pop();
+  @override
+  ConsumerState<ReceiptDetailScreen> createState() => _ReceiptDetailScreenState();
+}
+
+class _ReceiptDetailScreenState extends ConsumerState<ReceiptDetailScreen> {
+  bool _busy = false;
+
+  Future<void> _delete() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(receiptRepositoryProvider).delete(widget.receipt.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Deleting receipt failed', error: e, stackTrace: stackTrace, name: 'ReceiptDetailScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't delete. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final receipt = widget.receipt;
     final currency = ref.watch(userProfileProvider).valueOrNull?.currencySymbol ?? '₱';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Receipt'),
         actions: [
-          IconButton(onPressed: () => _delete(context, ref), icon: const Icon(LucideIcons.trash2)),
+          IconButton(onPressed: _busy ? null : _delete, icon: const Icon(LucideIcons.trash2)),
         ],
       ),
       body: ListView(

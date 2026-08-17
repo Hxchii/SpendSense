@@ -46,11 +46,15 @@ class _SpendSenseAppState extends ConsumerState<SpendSenseApp> with WidgetsBindi
   /// Re-arms the app lock whenever the app leaves the foreground, so
   /// returning to it requires the PIN/biometric again. Without this the lock
   /// would only ever be checked once, at cold start.
+  ///
+  /// Only `paused` counts: `hidden` is also delivered on the way back up, and
+  /// the biometric prompt itself can background the app — re-locking on
+  /// either would bounce the user between the prompt and the lock screen.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      ref.read(appUnlockedProvider.notifier).state = false;
-    }
+    if (state != AppLifecycleState.paused) return;
+    if (ref.read(biometricPromptActiveProvider)) return;
+    ref.read(appUnlockedProvider.notifier).state = false;
   }
 
   @override

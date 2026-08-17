@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +14,11 @@ import 'package:spendsense/features/recurring_bills/application/recurring_bill_p
 import 'package:spendsense/features/recurring_bills/domain/entities/recurring_bill.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class RecurringBillFormScreen extends ConsumerStatefulWidget {
   const RecurringBillFormScreen({super.key, this.bill});
@@ -31,6 +39,7 @@ class _RecurringBillFormScreenState extends ConsumerState<RecurringBillFormScree
   late DateTime _nextDueDate = widget.bill?.nextDueDate ?? DateTime.now().add(const Duration(days: 7));
   late bool _autoLog = widget.bill?.autoLogTransaction ?? false;
   late bool _isInstallment = widget.bill?.isInstallmentPlan ?? false;
+  bool _busy = false;
 
   bool get _editing => widget.bill != null;
 
@@ -48,6 +57,7 @@ class _RecurringBillFormScreenState extends ConsumerState<RecurringBillFormScree
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     final amount = Money.fromMajor(num.tryParse(_amountController.text.trim()) ?? 0);
     if (_nameController.text.trim().isEmpty || _categoryId == null || amount.minorUnits <= 0) {
       showValidationSnackBar(context, 'Enter a bill name, category, and a valid amount.');
@@ -59,37 +69,70 @@ class _RecurringBillFormScreenState extends ConsumerState<RecurringBillFormScree
       return;
     }
 
-    final repo = ref.read(recurringBillRepositoryProvider);
-    if (_editing) {
-      await repo.update(widget.bill!.copyWith(
-        name: _nameController.text.trim(),
-        categoryId: _categoryId,
-        walletId: _walletId,
-        amount: amount,
-        frequency: _frequency,
-        nextDueDate: _nextDueDate,
-        autoLogTransaction: _autoLog,
-        totalOccurrences: totalOccurrences,
-        clearTotalOccurrences: !_isInstallment,
-      ));
-    } else {
-      await repo.create(RecurringBillDraft(
-        name: _nameController.text.trim(),
-        categoryId: _categoryId!,
-        walletId: _walletId,
-        amount: amount,
-        frequency: _frequency,
-        nextDueDate: _nextDueDate,
-        autoLogTransaction: _autoLog,
-        totalOccurrences: totalOccurrences,
-      ));
+    setState(() => _busy = true);
+
+    try {
+      final repo = ref.read(recurringBillRepositoryProvider);
+      if (_editing) {
+        await repo
+            .update(widget.bill!.copyWith(
+              name: _nameController.text.trim(),
+              categoryId: _categoryId,
+              walletId: _walletId,
+              amount: amount,
+              frequency: _frequency,
+              nextDueDate: _nextDueDate,
+              autoLogTransaction: _autoLog,
+              totalOccurrences: totalOccurrences,
+              clearTotalOccurrences: !_isInstallment,
+            ))
+            .timeout(_writeTimeout);
+      } else {
+        await repo
+            .create(RecurringBillDraft(
+              name: _nameController.text.trim(),
+              categoryId: _categoryId!,
+              walletId: _walletId,
+              amount: amount,
+              frequency: _frequency,
+              nextDueDate: _nextDueDate,
+              autoLogTransaction: _autoLog,
+              totalOccurrences: totalOccurrences,
+            ))
+            .timeout(_writeTimeout);
+      }
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving recurring bill failed', error: e, stackTrace: stackTrace, name: 'RecurringBillFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (mounted) context.pop();
   }
 
   Future<void> _delete() async {
-    await ref.read(recurringBillRepositoryProvider).delete(widget.bill!.id);
-    if (mounted) context.pop();
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(recurringBillRepositoryProvider).delete(widget.bill!.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Deleting recurring bill failed', error: e, stackTrace: stackTrace, name: 'RecurringBillFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't delete. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -107,7 +150,7 @@ class _RecurringBillFormScreenState extends ConsumerState<RecurringBillFormScree
       appBar: AppBar(
         title: Text(_editing ? 'Edit Recurring Bill' : 'New Recurring Bill'),
         actions: [
-          if (_editing) IconButton(onPressed: _delete, icon: const Icon(LucideIcons.trash2)),
+          if (_editing) IconButton(onPressed: _busy ? null : _delete, icon: const Icon(LucideIcons.trash2)),
         ],
       ),
       body: ListView(
@@ -175,7 +218,7 @@ class _RecurringBillFormScreenState extends ConsumerState<RecurringBillFormScree
             ),
           ],
           const SizedBox(height: 24),
-          ElevatedButton(onPressed: _save, child: const Text('Save')),
+          ElevatedButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving…' : 'Save')),
         ],
       ),
     );

@@ -1,4 +1,7 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +11,11 @@ import 'package:spendsense/core/utils/money.dart';
 import 'package:spendsense/core/widgets/validation_snackbar.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class WalletFormScreen extends ConsumerStatefulWidget {
   const WalletFormScreen({super.key, this.wallet});
@@ -28,6 +36,7 @@ class _WalletFormScreenState extends ConsumerState<WalletFormScreen> {
   // Validated dataviz-skill categorical palette, in fixed slot order.
   static const _colors = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
   late String _colorHex = widget.wallet?.colorHex ?? _colors.first;
+  bool _busy = false;
 
   bool get _editing => widget.wallet != null;
 
@@ -39,24 +48,67 @@ class _WalletFormScreenState extends ConsumerState<WalletFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     if (_nameController.text.trim().isEmpty) {
       showValidationSnackBar(context, 'Enter a wallet name.');
       return;
     }
-    final repo = ref.read(walletRepositoryProvider);
-    final startingBalance = Money.fromMajor(num.tryParse(_balanceController.text.trim()) ?? 0);
-
-    if (_editing) {
-      await repo.update(widget.wallet!.copyWith(name: _nameController.text.trim(), type: _type, colorHex: _colorHex));
-    } else {
-      await repo.create(WalletDraft(name: _nameController.text.trim(), type: _type, startingBalance: startingBalance, colorHex: _colorHex));
+    // Left blank still means zero, but a typo like "1.2.3" must never be
+    // silently banked as ₱0.00.
+    final balanceText = _balanceController.text.trim();
+    final balance = balanceText.isEmpty ? 0 : num.tryParse(balanceText);
+    if (balance == null) {
+      showValidationSnackBar(context, 'Enter a valid starting balance.');
+      return;
     }
-    if (mounted) context.pop();
+    setState(() => _busy = true);
+
+    try {
+      final repo = ref.read(walletRepositoryProvider);
+      if (_editing) {
+        await repo.update(widget.wallet!.copyWith(name: _nameController.text.trim(), type: _type, colorHex: _colorHex)).timeout(_writeTimeout);
+      } else {
+        await repo
+            .create(WalletDraft(
+              name: _nameController.text.trim(),
+              type: _type,
+              startingBalance: Money.fromMajor(balance),
+              colorHex: _colorHex,
+            ))
+            .timeout(_writeTimeout);
+      }
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving wallet failed', error: e, stackTrace: stackTrace, name: 'WalletFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _archive() async {
-    await ref.read(walletRepositoryProvider).archive(widget.wallet!.id);
-    if (mounted) context.pop();
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(walletRepositoryProvider).archive(widget.wallet!.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Archived. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Archiving wallet failed', error: e, stackTrace: stackTrace, name: 'WalletFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't archive. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -65,7 +117,7 @@ class _WalletFormScreenState extends ConsumerState<WalletFormScreen> {
       appBar: AppBar(
         title: Text(_editing ? 'Edit Wallet' : 'New Wallet'),
         actions: [
-          if (_editing) IconButton(onPressed: _archive, icon: const Icon(LucideIcons.archive)),
+          if (_editing) IconButton(onPressed: _busy ? null : _archive, icon: const Icon(LucideIcons.archive)),
         ],
       ),
       body: ListView(
@@ -106,7 +158,7 @@ class _WalletFormScreenState extends ConsumerState<WalletFormScreen> {
             }).toList(),
           ),
           const SizedBox(height: 32),
-          ElevatedButton(onPressed: _save, child: const Text('Save')),
+          ElevatedButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving…' : 'Save')),
         ],
       ),
     );

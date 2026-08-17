@@ -115,4 +115,21 @@ class TransactionFilter {
     }
     return true;
   }
+
+  // Value equality is load-bearing: this is the key of a `.family` stream
+  // provider, so identity comparison would mint a brand-new provider (and a
+  // brand-new Firestore listener) on every single rebuild, looping forever.
+  @override
+  bool operator ==(Object other) {
+    return other is TransactionFilter &&
+        other.walletId == walletId &&
+        other.categoryId == categoryId &&
+        other.type == type &&
+        other.from == from &&
+        other.to == to &&
+        other.searchText == searchText;
+  }
+
+  @override
+  int get hashCode => Object.hash(walletId, categoryId, type, from, to, searchText);
 }

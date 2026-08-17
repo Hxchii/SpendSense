@@ -49,9 +49,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     redirect: (context, state) {
       final profile = ref.read(userProfileProvider).valueOrNull;
-      if (profile == null) return null;
-
       final loc = state.matchedLocation;
+
+      // Until the profile is known we can't tell whether a lock applies, so
+      // fail closed and hold on the lock screen rather than briefly rendering
+      // the dashboard (balances and all) to someone who hasn't authenticated.
+      if (profile == null) {
+        return ref.read(appUnlockedProvider) || loc == '/lock' ? null : '/lock';
+      }
       if (!profile.onboardingComplete) {
         return loc.startsWith('/onboarding') ? null : '/onboarding';
       }

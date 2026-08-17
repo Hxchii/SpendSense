@@ -56,10 +56,18 @@ class RecurringBill {
       case BillFrequency.weekly:
         return nextDueDate.add(const Duration(days: 7));
       case BillFrequency.monthly:
-        return DateTime(nextDueDate.year, nextDueDate.month + 1, nextDueDate.day);
+        return _sameDayNextPeriod(nextDueDate.year, nextDueDate.month + 1);
       case BillFrequency.yearly:
-        return DateTime(nextDueDate.year + 1, nextDueDate.month, nextDueDate.day);
+        return _sameDayNextPeriod(nextDueDate.year + 1, nextDueDate.month);
     }
+  }
+
+  /// Clamps to the last day of the target month. `DateTime(y, 2, 31)`
+  /// silently rolls over into March, which would walk a bill due on the 31st
+  /// permanently off its date (Jan 31 → Mar 3 → Apr 3 → …).
+  DateTime _sameDayNextPeriod(int year, int month) {
+    final lastDayOfMonth = DateTime(year, month + 1, 0).day;
+    return DateTime(year, month, nextDueDate.day.clamp(1, lastDayOfMonth));
   }
 
   RecurringBill copyWith({

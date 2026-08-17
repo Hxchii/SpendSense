@@ -1,4 +1,7 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +15,11 @@ import 'package:spendsense/features/transactions/application/transaction_provide
 import 'package:spendsense/features/transactions/domain/entities/transaction.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class TransactionFormScreen extends ConsumerStatefulWidget {
   const TransactionFormScreen({super.key, this.transaction});
@@ -31,6 +39,7 @@ class _TransactionFormScreenState extends ConsumerState<TransactionFormScreen> {
   late DateTime _date = widget.transaction?.date ?? DateTime.now();
   late String? _walletId = widget.transaction?.walletId;
   late String? _categoryId = widget.transaction?.categoryId;
+  bool _busy = false;
 
   bool get _editing => widget.transaction != null;
 
@@ -47,38 +56,71 @@ class _TransactionFormScreenState extends ConsumerState<TransactionFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     final amount = Money.fromMajor(num.tryParse(_amountController.text.trim()) ?? 0);
     if (amount.minorUnits <= 0 || _walletId == null || _categoryId == null) {
       showValidationSnackBar(context, 'Enter a valid amount, wallet, and category.');
       return;
     }
+    setState(() => _busy = true);
 
-    final repo = ref.read(transactionRepositoryProvider);
-    if (_editing) {
-      await repo.update(widget.transaction!.copyWith(
-        walletId: _walletId,
-        categoryId: _categoryId,
-        type: _type,
-        amount: amount,
-        date: _date,
-        note: _noteController.text.trim(),
-      ));
-    } else {
-      await repo.create(TransactionDraft(
-        walletId: _walletId!,
-        categoryId: _categoryId!,
-        type: _type,
-        amount: amount,
-        date: _date,
-        note: _noteController.text.trim(),
-      ));
+    try {
+      final repo = ref.read(transactionRepositoryProvider);
+      if (_editing) {
+        await repo
+            .update(widget.transaction!.copyWith(
+              walletId: _walletId,
+              categoryId: _categoryId,
+              type: _type,
+              amount: amount,
+              date: _date,
+              note: _noteController.text.trim(),
+            ))
+            .timeout(_writeTimeout);
+      } else {
+        await repo
+            .create(TransactionDraft(
+              walletId: _walletId!,
+              categoryId: _categoryId!,
+              type: _type,
+              amount: amount,
+              date: _date,
+              note: _noteController.text.trim(),
+            ))
+            .timeout(_writeTimeout);
+      }
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving transaction failed', error: e, stackTrace: stackTrace, name: 'TransactionFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (mounted) context.pop();
   }
 
   Future<void> _delete() async {
-    await ref.read(transactionRepositoryProvider).delete(widget.transaction!.id);
-    if (mounted) context.pop();
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(transactionRepositoryProvider).delete(widget.transaction!.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Deleting transaction failed', error: e, stackTrace: stackTrace, name: 'TransactionFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't delete. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -103,7 +145,7 @@ class _TransactionFormScreenState extends ConsumerState<TransactionFormScreen> {
       appBar: AppBar(
         title: Text(_editing ? 'Edit Transaction' : 'New Transaction'),
         actions: [
-          if (_editing) IconButton(onPressed: _delete, icon: const Icon(LucideIcons.trash2)),
+          if (_editing) IconButton(onPressed: _busy ? null : _delete, icon: const Icon(LucideIcons.trash2)),
         ],
       ),
       body: ListView(
@@ -151,7 +193,7 @@ class _TransactionFormScreenState extends ConsumerState<TransactionFormScreen> {
           ),
           TextField(controller: _noteController, decoration: const InputDecoration(labelText: 'Note (optional)')),
           const SizedBox(height: 32),
-          ElevatedButton(onPressed: _save, child: const Text('Save')),
+          ElevatedButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving…' : 'Save')),
         ],
       ),
     );

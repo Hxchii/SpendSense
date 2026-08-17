@@ -175,6 +175,33 @@ class SettingsScreen extends ConsumerWidget {
       await ref.read(pinStoreProvider).savePin(pin);
     }
 
+    // Never store a lock the device can't actually satisfy — the lock screen
+    // is the only route out, so enabling biometrics with nothing enrolled
+    // would leave the account permanently unopenable.
+    if (chosen == AppLockType.biometric) {
+      final auth = ref.read(localAuthProvider);
+      var available = false;
+      try {
+        available = (await auth.canCheckBiometrics || await auth.isDeviceSupported()) &&
+            (await auth.getAvailableBiometrics()).isNotEmpty;
+      } catch (_) {
+        available = false;
+      }
+      if (!available) {
+        if (context.mounted) {
+          showValidationSnackBar(
+            context,
+            'No fingerprint or face unlock is set up on this device. Set one up in your phone settings first, or use a PIN.',
+          );
+        }
+        return;
+      }
+    }
+
+    if (chosen == AppLockType.none) {
+      await ref.read(pinStoreProvider).clearPin();
+    }
+
     await ref.read(userProfileRepositoryProvider).update(profile.copyWith(appLockType: chosen));
     ref.read(appUnlockedProvider.notifier).state = true;
   }

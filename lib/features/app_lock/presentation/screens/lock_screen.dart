@@ -33,9 +33,18 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   }
 
   Future<void> _tryBiometric() async {
+    if (_checking) return;
     setState(() => _checking = true);
-    final ok = await tryBiometricUnlock(ref.read(localAuthProvider));
-    setState(() => _checking = false);
+    final promptFlag = ref.read(biometricPromptActiveProvider.notifier);
+    promptFlag.state = true;
+    bool ok;
+    try {
+      ok = await tryBiometricUnlock(ref.read(localAuthProvider));
+    } finally {
+      promptFlag.state = false;
+      if (mounted) setState(() => _checking = false);
+    }
+    if (!mounted) return;
     if (ok) {
       ref.read(appUnlockedProvider.notifier).state = true;
     } else {
@@ -44,7 +53,15 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   }
 
   Future<void> _submitPin() async {
-    final ok = await ref.read(pinStoreProvider).verifyPin(_pinController.text.trim());
+    if (_checking) return;
+    setState(() => _checking = true);
+    bool ok;
+    try {
+      ok = await ref.read(pinStoreProvider).verifyPin(_pinController.text.trim());
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+    if (!mounted) return;
     if (ok) {
       ref.read(appUnlockedProvider.notifier).state = true;
     } else {

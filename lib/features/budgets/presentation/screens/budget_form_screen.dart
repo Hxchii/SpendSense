@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +11,11 @@ import 'package:spendsense/core/widgets/validation_snackbar.dart';
 import 'package:spendsense/features/budgets/application/budget_providers.dart';
 import 'package:spendsense/features/budgets/domain/entities/budget.dart';
 import 'package:spendsense/features/categories/application/category_providers.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class BudgetFormScreen extends ConsumerStatefulWidget {
   const BudgetFormScreen({super.key, this.budget});
@@ -22,6 +30,7 @@ class _BudgetFormScreenState extends ConsumerState<BudgetFormScreen> {
   late final _limitController = TextEditingController(text: widget.budget == null ? '' : widget.budget!.limitAmount.major.toStringAsFixed(2));
   late String? _categoryId = widget.budget?.categoryId;
   late BudgetPeriod _period = widget.budget?.period ?? BudgetPeriod.monthly;
+  bool _busy = false;
 
   bool get _editing => widget.budget != null;
 
@@ -32,27 +41,58 @@ class _BudgetFormScreenState extends ConsumerState<BudgetFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     final limit = Money.fromMajor(num.tryParse(_limitController.text.trim()) ?? 0);
     if (_categoryId == null || limit.minorUnits <= 0) {
       showValidationSnackBar(context, 'Choose a category and enter a valid limit.');
       return;
     }
+    setState(() => _busy = true);
 
-    final repo = ref.read(budgetRepositoryProvider);
-    if (_editing) {
-      await repo.update(widget.budget!.copyWith(categoryId: _categoryId, period: _period, limitAmount: limit));
-    } else {
-      final now = DateTime.now();
-      final start = DateTime(now.year, now.month, 1);
-      final end = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
-      await repo.create(BudgetDraft(categoryId: _categoryId!, period: _period, limitAmount: limit, startDate: start, endDate: end));
+    try {
+      final repo = ref.read(budgetRepositoryProvider);
+      if (_editing) {
+        await repo.update(widget.budget!.copyWith(categoryId: _categoryId, period: _period, limitAmount: limit)).timeout(_writeTimeout);
+      } else {
+        final now = DateTime.now();
+        final start = DateTime(now.year, now.month, 1);
+        final end = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+        await repo
+            .create(BudgetDraft(categoryId: _categoryId!, period: _period, limitAmount: limit, startDate: start, endDate: end))
+            .timeout(_writeTimeout);
+      }
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving budget failed', error: e, stackTrace: stackTrace, name: 'BudgetFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (mounted) context.pop();
   }
 
   Future<void> _delete() async {
-    await ref.read(budgetRepositoryProvider).delete(widget.budget!.id);
-    if (mounted) context.pop();
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(budgetRepositoryProvider).delete(widget.budget!.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Deleting budget failed', error: e, stackTrace: stackTrace, name: 'BudgetFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't delete. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -64,7 +104,7 @@ class _BudgetFormScreenState extends ConsumerState<BudgetFormScreen> {
       appBar: AppBar(
         title: Text(_editing ? 'Edit Budget' : 'New Budget'),
         actions: [
-          if (_editing) IconButton(onPressed: _delete, icon: const Icon(LucideIcons.trash2)),
+          if (_editing) IconButton(onPressed: _busy ? null : _delete, icon: const Icon(LucideIcons.trash2)),
         ],
       ),
       body: ListView(
@@ -91,7 +131,7 @@ class _BudgetFormScreenState extends ConsumerState<BudgetFormScreen> {
             onChanged: (v) => setState(() => _period = v ?? _period),
           ),
           const SizedBox(height: 32),
-          ElevatedButton(onPressed: _save, child: const Text('Save')),
+          ElevatedButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving…' : 'Save')),
         ],
       ),
     );

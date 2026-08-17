@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +15,11 @@ import 'package:spendsense/features/savings_goals/application/savings_goal_provi
 import 'package:spendsense/features/savings_goals/domain/entities/savings_goal.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point the save counts as done.
+const _writeTimeout = Duration(seconds: 5);
 
 class SavingsGoalFormScreen extends ConsumerStatefulWidget {
   const SavingsGoalFormScreen({super.key, this.goal});
@@ -34,6 +42,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
       TextEditingController(text: widget.goal?.autoContributeAmount == null ? '' : widget.goal!.autoContributeAmount!.major.toStringAsFixed(2));
   late GoalReminderFrequency _autoContributeFrequency = widget.goal?.autoContributeFrequency ?? GoalReminderFrequency.monthly;
   late String? _walletId = widget.goal?.walletId;
+  bool _busy = false;
 
   bool get _editing => widget.goal != null;
 
@@ -56,6 +65,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     final target = Money.fromMajor(num.tryParse(_targetController.text.trim()) ?? 0);
     if (_nameController.text.trim().isEmpty || target.minorUnits <= 0) {
       showValidationSnackBar(context, 'Enter a goal name and a valid target amount.');
@@ -84,42 +94,75 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
             ? widget.goal!.nextContributionDate
             : _advancedReminderDate(DateTime.now(), _autoContributeFrequency);
 
-    final repo = ref.read(savingsGoalRepositoryProvider);
-    if (_editing) {
-      await repo.update(widget.goal!.copyWith(
-        name: _nameController.text.trim(),
-        targetAmount: target,
-        targetDate: _targetDate,
-        iconKey: _iconKey,
-        reminderFrequency: _remindMe ? _reminderFrequency : null,
-        nextReminderDate: nextReminderDate,
-        clearReminder: !_remindMe,
-        walletId: _autoContribute ? _walletId : null,
-        autoContributeAmount: autoContributeAmount,
-        autoContributeFrequency: _autoContribute ? _autoContributeFrequency : null,
-        nextContributionDate: nextContributionDate,
-        clearAutoContribute: !_autoContribute,
-      ));
-    } else {
-      await repo.create(SavingsGoalDraft(
-        name: _nameController.text.trim(),
-        targetAmount: target,
-        iconKey: _iconKey,
-        targetDate: _targetDate,
-        reminderFrequency: _remindMe ? _reminderFrequency : null,
-        nextReminderDate: nextReminderDate,
-        walletId: _autoContribute ? _walletId : null,
-        autoContributeAmount: autoContributeAmount,
-        autoContributeFrequency: _autoContribute ? _autoContributeFrequency : null,
-        nextContributionDate: nextContributionDate,
-      ));
+    setState(() => _busy = true);
+
+    try {
+      final repo = ref.read(savingsGoalRepositoryProvider);
+      if (_editing) {
+        await repo
+            .update(widget.goal!.copyWith(
+              name: _nameController.text.trim(),
+              targetAmount: target,
+              targetDate: _targetDate,
+              iconKey: _iconKey,
+              reminderFrequency: _remindMe ? _reminderFrequency : null,
+              nextReminderDate: nextReminderDate,
+              clearReminder: !_remindMe,
+              walletId: _autoContribute ? _walletId : null,
+              autoContributeAmount: autoContributeAmount,
+              autoContributeFrequency: _autoContribute ? _autoContributeFrequency : null,
+              nextContributionDate: nextContributionDate,
+              clearAutoContribute: !_autoContribute,
+            ))
+            .timeout(_writeTimeout);
+      } else {
+        await repo
+            .create(SavingsGoalDraft(
+              name: _nameController.text.trim(),
+              targetAmount: target,
+              iconKey: _iconKey,
+              targetDate: _targetDate,
+              reminderFrequency: _remindMe ? _reminderFrequency : null,
+              nextReminderDate: nextReminderDate,
+              walletId: _autoContribute ? _walletId : null,
+              autoContributeAmount: autoContributeAmount,
+              autoContributeFrequency: _autoContribute ? _autoContributeFrequency : null,
+              nextContributionDate: nextContributionDate,
+            ))
+            .timeout(_writeTimeout);
+      }
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Saving savings goal failed', error: e, stackTrace: stackTrace, name: 'SavingsGoalFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't save. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (mounted) context.pop();
   }
 
   Future<void> _delete() async {
-    await ref.read(savingsGoalRepositoryProvider).delete(widget.goal!.id);
-    if (mounted) context.pop();
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await ref.read(savingsGoalRepositoryProvider).delete(widget.goal!.id).timeout(_writeTimeout);
+      if (mounted) context.pop();
+    } on TimeoutException {
+      if (mounted) {
+        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        context.pop();
+      }
+    } catch (e, stackTrace) {
+      developer.log('Deleting savings goal failed', error: e, stackTrace: stackTrace, name: 'SavingsGoalFormScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't delete. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   DateTime _advancedReminderDate(DateTime from, GoalReminderFrequency frequency) {
@@ -142,7 +185,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
       appBar: AppBar(
         title: Text(_editing ? 'Edit Savings Goal' : 'New Savings Goal'),
         actions: [
-          if (_editing) IconButton(onPressed: _delete, icon: const Icon(LucideIcons.trash2)),
+          if (_editing) IconButton(onPressed: _busy ? null : _delete, icon: const Icon(LucideIcons.trash2)),
         ],
       ),
       body: ListView(
@@ -239,7 +282,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
             ),
           ],
           const SizedBox(height: 24),
-          ElevatedButton(onPressed: _save, child: const Text('Save')),
+          ElevatedButton(onPressed: _busy ? null : _save, child: Text(_busy ? 'Saving…' : 'Save')),
         ],
       ),
     );

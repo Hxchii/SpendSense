@@ -1,4 +1,5 @@
-﻿import 'dart:developer' as developer;
+﻿import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,21 @@ import 'package:spendsense/features/profile_settings/application/user_profile_pr
 import 'package:spendsense/features/profile_settings/domain/entities/user_profile.dart';
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
+
+/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// offline never happens — but the record is already durable in the local
+/// cache and syncs later, so past this point setup counts as done.
+const _writeTimeout = Duration(seconds: 5);
+
+/// A blank money field legitimately means "not set", but the `[0-9.]`
+/// formatter still lets a typo like "1.2.3" through — that must never be
+/// banked as ₱0.00, so it parses to null and the caller rejects it.
+Money? _parseMoney(String text) {
+  final value = num.tryParse(text.trim());
+  return value == null ? null : Money.fromMajor(value);
+}
+
+bool _isUsableAmount(String text) => text.trim().isEmpty || _parseMoney(text) != null;
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -38,6 +54,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   WalletType _walletType = WalletType.cash;
   AppLockType _lockType = AppLockType.none;
   NotificationPrefs _notifPrefs = const NotificationPrefs();
+  bool _busy = false;
+  bool _walletCreated = false;
 
   static const _lastPage = 3;
 
@@ -64,9 +82,19 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   void _next() {
-    if (_page == 2 && _walletNameController.text.trim().isEmpty) {
-      showValidationSnackBar(context, 'Give your wallet a name so we know where money is coming from.');
+    if (_page == 0 && (!_isUsableAmount(_incomeController.text) || !_isUsableAmount(_budgetController.text))) {
+      showValidationSnackBar(context, 'Enter valid amounts for your monthly income and budget.');
       return;
+    }
+    if (_page == 2) {
+      if (_walletNameController.text.trim().isEmpty) {
+        showValidationSnackBar(context, 'Give your wallet a name so we know where money is coming from.');
+        return;
+      }
+      if (!_isUsableAmount(_walletBalanceController.text)) {
+        showValidationSnackBar(context, 'Enter a valid current balance.');
+        return;
+      }
     }
     if (_page == _lastPage) {
       _finish();
@@ -95,39 +123,76 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
   }
 
+  /// Each write is issued on its own so a hung server ack can't stop the
+  /// next one from reaching the local cache — the profile update is what
+  /// routes the user out of onboarding, so it has to land either way.
+  Future<void> _queuedWrite(Future<void> Function() write) async {
+    try {
+      await write().timeout(_writeTimeout);
+    } on TimeoutException {
+      developer.log('Onboarding write not acknowledged yet; it will sync later', name: 'OnboardingScreen');
+    }
+  }
+
   Future<void> _finish() async {
-    if (_lockType == AppLockType.pin && _pinController.text.trim().length >= 4) {
-      await ref.read(pinStoreProvider).savePin(_pinController.text.trim());
-    }
+    if (_busy) return;
+    setState(() => _busy = true);
 
-    await ref.read(walletRepositoryProvider).create(WalletDraft(
-          name: _walletNameController.text.trim(),
-          type: _walletType,
-          startingBalance: Money.fromMajor(num.tryParse(_walletBalanceController.text.trim()) ?? 0),
-          colorHex: '#2a78d6',
-        ));
+    // Resolved before the first await: the profile update routes this screen
+    // away the moment it lands, and ref is unusable once we're disposed.
+    final pinStore = ref.read(pinStoreProvider);
+    final walletRepo = ref.read(walletRepositoryProvider);
+    final profileRepo = ref.read(userProfileRepositoryProvider);
+    final unlocked = ref.read(appUnlockedProvider.notifier);
+    final notifications = ref.read(notificationServiceProvider);
 
-    final repo = ref.read(userProfileRepositoryProvider);
-    final current = await repo.get();
-    await repo.update(current.copyWith(
-      displayName: _nameController.text.trim(),
-      currencySymbol: _currency,
-      monthlyIncome: _incomeController.text.trim().isEmpty ? null : Money.fromMajor(num.tryParse(_incomeController.text.trim()) ?? 0),
-      monthlyBudget: _budgetController.text.trim().isEmpty ? null : Money.fromMajor(num.tryParse(_budgetController.text.trim()) ?? 0),
-      financialGoal: _goal,
-      notificationPrefs: _notifPrefs,
-      appLockType: _lockType,
-      onboardingComplete: true,
-    ));
-    if (_lockType != AppLockType.none) {
-      ref.read(appUnlockedProvider.notifier).state = true;
-    }
-    // Ask for camera + notification permissions now, from this genuine
-    // "Get Started" tap, so nothing interrupts the user mid-flow later and
-    // reminders work from the very first launch.
-    await _requestCameraPermission();
-    if (_notifPrefs.budgetAlerts || _notifPrefs.billReminders || _notifPrefs.savingsGoalReminders) {
-      await ref.read(notificationServiceProvider).requestPermission();
+    try {
+      // Permissions FIRST, while this screen is still mounted and in front of
+      // the user. The profile write below flips onboardingComplete, which
+      // redirects away the instant it lands locally — anything asked after
+      // that would pop over the dashboard instead of reading as part of setup.
+      await _requestCameraPermission();
+      if (_notifPrefs.budgetAlerts || _notifPrefs.billReminders || _notifPrefs.savingsGoalReminders) {
+        await notifications.requestPermission();
+      }
+
+      if (_lockType == AppLockType.pin && _pinController.text.trim().length >= 4) {
+        await pinStore.savePin(_pinController.text.trim());
+      }
+
+      // Remembered across retries: if a later step fails and the user taps
+      // Get Started again, a brand-new account must not end up with two
+      // wallets.
+      if (!_walletCreated) {
+        await _queuedWrite(() => walletRepo.create(WalletDraft(
+              name: _walletNameController.text.trim(),
+              type: _walletType,
+              startingBalance: _parseMoney(_walletBalanceController.text) ?? Money.zero,
+              colorHex: '#2a78d6',
+            )));
+        _walletCreated = true;
+      }
+
+      final current = await profileRepo.get();
+      await _queuedWrite(() => profileRepo.update(current.copyWith(
+            displayName: _nameController.text.trim(),
+            currencySymbol: _currency,
+            monthlyIncome: _parseMoney(_incomeController.text),
+            monthlyBudget: _parseMoney(_budgetController.text),
+            financialGoal: _goal,
+            notificationPrefs: _notifPrefs,
+            appLockType: _lockType,
+            onboardingComplete: true,
+          )));
+      if (_lockType != AppLockType.none) {
+        unlocked.state = true;
+      }
+    } catch (e, stackTrace) {
+      developer.log('Finishing onboarding failed', error: e, stackTrace: stackTrace, name: 'OnboardingScreen');
+      if (mounted) showValidationSnackBar(context, "Couldn't finish setting up. Please try again.");
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -176,7 +241,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     if (_page > 0) ...[
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _back,
+                          onPressed: _busy ? null : _back,
                           child: const Text('Back'),
                         ),
                       ),
@@ -185,8 +250,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     Expanded(
                       flex: _page > 0 ? 2 : 1,
                       child: ElevatedButton(
-                        onPressed: _next,
-                        child: Text(_page == _lastPage ? 'Get Started' : 'Continue'),
+                        onPressed: _busy ? null : _next,
+                        child: Text(_busy
+                            ? 'Setting up…'
+                            : _page == _lastPage
+                                ? 'Get Started'
+                                : 'Continue'),
                       ),
                     ),
                   ],
@@ -233,15 +302,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           const SizedBox(height: 14),
           TextField(
             controller: _incomeController,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
             decoration: const InputDecoration(labelText: 'Monthly income (optional)'),
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _budgetController,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
             decoration: const InputDecoration(labelText: 'Monthly budget (optional)'),
           ),
         ],

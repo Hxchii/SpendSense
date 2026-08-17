@@ -30,49 +30,60 @@ class AppShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Scaffold(
-      // Deliberately NOT using Scaffold's bottomNavigationBar slot — it wraps
-      // its content in an opaque Material that fills the whole slot, which
-      // shows through as a bar behind a rounded/margined pill. Overlaying it
-      // directly on the body is the only way to get a truly floating nav.
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Padding(padding: const EdgeInsets.only(bottom: 72), child: child),
-            ),
-            Positioned(
-              left: 28,
-              right: 28,
-              bottom: 10,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadius.xl),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    height: 52,
-                    decoration: BoxDecoration(
-                      // Semi-transparent + blurred behind it — a genuinely
-                      // floating glass pill instead of an opaque bar that
-                      // just happens to have rounded corners.
-                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(AppRadius.xl),
-                      border: Border.all(color: colors.hairline),
-                      boxShadow: [
-                        BoxShadow(color: colors.ink.withValues(alpha: 0.08), blurRadius: 24, offset: const Offset(0, 8)),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        for (var i = 0; i < _destinations.length; i++)
-                          Expanded(child: _NavItem(destination: _destinations[i], selected: i == _currentIndex)),
-                      ],
+    final onHome = _currentIndex == 0;
+    return PopScope(
+      // Back from any tab returns to the dashboard first; only a back press
+      // from the dashboard itself is allowed to leave the app. Tab switches
+      // use go() (which replaces rather than stacks), so without this a back
+      // press from any other tab would exit outright.
+      canPop: onHome,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) context.go('/');
+      },
+      child: Scaffold(
+        // Deliberately NOT using Scaffold's bottomNavigationBar slot — it wraps
+        // its content in an opaque Material that fills the whole slot, which
+        // shows through as a bar behind a rounded/margined pill. Overlaying it
+        // directly on the body is the only way to get a truly floating nav.
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(padding: const EdgeInsets.only(bottom: 72), child: child),
+              ),
+              Positioned(
+                left: 28,
+                right: 28,
+                bottom: 10,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                    child: Container(
+                      height: 52,
+                      decoration: BoxDecoration(
+                        // Semi-transparent + blurred behind it — a genuinely
+                        // floating glass pill instead of an opaque bar that
+                        // just happens to have rounded corners.
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(AppRadius.xl),
+                        border: Border.all(color: colors.hairline),
+                        boxShadow: [
+                          BoxShadow(color: colors.ink.withValues(alpha: 0.08), blurRadius: 24, offset: const Offset(0, 8)),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          for (var i = 0; i < _destinations.length; i++)
+                            Expanded(child: _NavItem(destination: _destinations[i], selected: i == _currentIndex)),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
