@@ -24,15 +24,21 @@ RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --no-in
 
 COPY . .
 
-# Listed one per line rather than with brace expansion, which the shell that
-# runs RUN does not reliably support.
-RUN composer dump-autoload --optimize --no-dev \
-    && mkdir -p storage/framework/cache \
-                storage/framework/sessions \
-                storage/framework/views \
-                storage/logs \
-                bootstrap/cache \
-    && chmod -R 777 storage bootstrap/cache
+# Directories first: dumping the autoloader triggers Laravel's package
+# discovery, which writes into bootstrap/cache — creating it afterwards meant
+# that step ran against a directory that did not exist yet.
+#
+# --no-scripts on top of that, because package discovery boots the framework,
+# and the environment it needs (app key, credentials) only exists at run time.
+# Laravel falls back to discovering packages on the first request when no
+# cached manifest is present.
+RUN mkdir -p storage/framework/cache \
+             storage/framework/sessions \
+             storage/framework/views \
+             storage/logs \
+             bootstrap/cache \
+    && chmod -R 777 storage bootstrap/cache \
+    && composer dump-autoload --optimize --no-dev --no-scripts
 
 # The host assigns the port and it is not fixed between deploys, so it is read
 # at start rather than baked in.
