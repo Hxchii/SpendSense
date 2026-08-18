@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/seed/seed_ids.dart';
@@ -46,11 +48,18 @@ DateTime _sameDayNextMonth(DateTime from) {
 /// every active goal whose reminder schedule has come due, then advances it.
 final dueGoalRemindersSweepProvider = FutureProvider<void>((ref) async {
   // Runs AFTER the contribution sweep, never alongside it. Both write whole
-  // goal documents with set(), so overlapping them let the reminder's write
-  // clobber a contribution that had just been applied — reverting the goal's
-  // balance while leaving the expense transaction behind, and re-charging on
-  // the next launch because nextContributionDate went back too.
-  await ref.watch(dueGoalAutoContributionsSweepProvider.future);
+  // goal documents, so overlapping them let the reminder's write clobber a
+  // contribution that had just been applied — reverting the goal's balance
+  // while leaving the expense transaction behind, and re-charging on the next
+  // launch because nextContributionDate went back too.
+  //
+  // Ordering is all that's needed here; a failed contribution must not also
+  // suppress reminders, so its error is deliberately not propagated.
+  try {
+    await ref.watch(dueGoalAutoContributionsSweepProvider.future);
+  } catch (e, stackTrace) {
+    developer.log('Contribution sweep failed; continuing to reminders', error: e, stackTrace: stackTrace, name: 'SavingsGoals');
+  }
 
   final goalRepo = ref.read(savingsGoalRepositoryProvider);
   final reminderRepo = ref.read(reminderRepositoryProvider);
@@ -168,14 +177,30 @@ class SavingsGoalContributionController {
     final previousCurrentAmount = goal.currentAmount;
     final previousNextContributionDate = goal.nextContributionDate;
     final newAmount = goal.currentAmount + amount;
-    await goalRepo.update(goal.copyWith(
-      currentAmount: newAmount,
-      status: newAmount >= goal.targetAmount ? GoalStatus.completed : goal.status,
-      nextContributionDate: nextContributionDate,
-      lastContributionTransactionId: transaction.id,
-      previousCurrentAmount: previousCurrentAmount,
-      previousNextContributionDate: previousNextContributionDate,
-    ));
+
+    // If crediting the goal fails, the expense is rolled back. The two are
+    // separate network writes: leaving the transaction behind would debit the
+    // wallet while the goal showed no progress and its schedule stayed due —
+    // so every launch would contribute again, draining the wallet with
+    // nothing to show for it and no undo record to reverse.
+    try {
+      await goalRepo.update(goal.copyWith(
+        currentAmount: newAmount,
+        status: newAmount >= goal.targetAmount ? GoalStatus.completed : goal.status,
+        nextContributionDate: nextContributionDate,
+        lastContributionTransactionId: transaction.id,
+        previousCurrentAmount: previousCurrentAmount,
+        previousNextContributionDate: previousNextContributionDate,
+      ));
+    } catch (e) {
+      try {
+        await _ref.read(transactionRepositoryProvider).delete(transaction.id);
+      } catch (_) {
+        // The goal stays uncredited and the stray expense is visible in
+        // Activity; better than silently re-charging on every launch.
+      }
+      rethrow;
+    }
   }
 
   Future<void> undoLastContribution(String id) async {
@@ -210,12 +235,19 @@ class SavingsGoalContributionController {
       if (contributionDate == null) continue;
       final dueDate = DateTime(contributionDate.year, contributionDate.month, contributionDate.day);
       if (dueDate.isAfter(dueToday)) continue;
-      await contributeNow(goal.id);
-      if (notificationsOn) {
-        await _ref.read(notificationServiceProvider).show(
-              title: 'Auto-contributed to "${goal.name}"',
-              body: '${goal.autoContributeAmount!.format(currency)} was added automatically.',
-            );
+
+      // Isolated per goal: one failed contribution used to abort the loop and
+      // skip every remaining goal for the session.
+      try {
+        await contributeNow(goal.id);
+        if (notificationsOn) {
+          await _ref.read(notificationServiceProvider).show(
+                title: 'Auto-contributed to "${goal.name}"',
+                body: '${goal.autoContributeAmount!.format(currency)} was added automatically.',
+              );
+        }
+      } catch (e, stackTrace) {
+        developer.log('Auto-contribute failed for "${goal.name}"', error: e, stackTrace: stackTrace, name: 'SavingsGoals');
       }
     }
   }

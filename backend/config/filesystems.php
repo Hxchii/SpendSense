@@ -33,7 +33,10 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Off: this registers unauthenticated GET/PUT /storage/{path}
+            // routes signed with APP_KEY. Nothing here serves user files, so
+            // it is surface with no purpose.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

@@ -67,7 +67,10 @@ class ApiRecurringBillRepository implements RecurringBillRepository {
   static DateTime? _dateOrNull(Object? v) {
     if (v is Timestamp) return v.toDate();
     if (v is DateTime) return v;
-    if (v is String) return DateTime.tryParse(v);
+    // toLocal: the API returns UTC ("...Z"), and DateTime.parse keeps it UTC.
+    // Firestore used to hand back local times, so without this every date
+    // reads a day early for anything before 08:00 in UTC+8.
+    if (v is String) return DateTime.tryParse(v)?.toLocal();
     return null;
   }
 

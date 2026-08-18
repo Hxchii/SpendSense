@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/services/notification_service.dart';
@@ -68,8 +70,14 @@ class RecurringBillPaymentController {
     }
 
     final previousDueDate = bill.nextDueDate;
-    final updated = await billRepo.markPaidNow(id);
 
+    // The expense is recorded BEFORE the bill is advanced, and the advance is
+    // undone if it fails. These are separate network writes with nothing
+    // tying them together, so the order decides how a half-failure lands:
+    // advancing first meant a dropped connection marked the bill paid while
+    // no money ever moved, and the next run skipped it — the payment simply
+    // disappeared. This way a failure leaves the bill untouched and still
+    // due, so the next run retries it.
     String? transactionId;
     if (walletId != null) {
       final transaction = await _ref.read(transactionRepositoryProvider).create(TransactionDraft(
@@ -84,11 +92,26 @@ class RecurringBillPaymentController {
       transactionId = transaction.id;
     }
 
-    await billRepo.update(updated.copyWith(
-      lastPaymentTransactionId: transactionId,
-      previousDueDate: transactionId == null ? null : previousDueDate,
-      clearLastPayment: transactionId == null,
-    ));
+    try {
+      final updated = await billRepo.markPaidNow(id);
+      await billRepo.update(updated.copyWith(
+        lastPaymentTransactionId: transactionId,
+        previousDueDate: transactionId == null ? null : previousDueDate,
+        clearLastPayment: transactionId == null,
+      ));
+    } catch (e) {
+      // Roll the expense back rather than leave the wallet debited for a bill
+      // that is still showing as unpaid.
+      if (transactionId != null) {
+        try {
+          await _ref.read(transactionRepositoryProvider).delete(transactionId);
+        } catch (_) {
+          // Nothing better to do here; the bill stays due and the stray
+          // expense is visible in Activity for the user to remove.
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<void> undoLastPayment(String id) async {
@@ -116,12 +139,20 @@ class RecurringBillPaymentController {
       if (bill.status != BillStatus.active) continue;
       final dueDate = DateTime(bill.nextDueDate.year, bill.nextDueDate.month, bill.nextDueDate.day);
       if (dueDate.isAfter(dueToday)) continue;
-      await payBill(bill.id, onlyIfDueOn: bill.nextDueDate);
-      if (notificationsOn) {
-        await _ref.read(notificationServiceProvider).show(
-              title: '"${bill.name}" auto-paid',
-              body: '${bill.amount.format(currency)} was deducted automatically.',
-            );
+
+      // Each bill is isolated: one failing write used to abort the loop, so
+      // every remaining due bill was silently skipped for the whole session.
+      // A bill that fails here is left untouched and retried next launch.
+      try {
+        await payBill(bill.id, onlyIfDueOn: bill.nextDueDate);
+        if (notificationsOn) {
+          await _ref.read(notificationServiceProvider).show(
+                title: '"${bill.name}" auto-paid',
+                body: '${bill.amount.format(currency)} was deducted automatically.',
+              );
+        }
+      } catch (e, stackTrace) {
+        developer.log('Auto-pay failed for "${bill.name}"', error: e, stackTrace: stackTrace, name: 'RecurringBills');
       }
     }
   }

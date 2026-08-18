@@ -1,9 +1,12 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:developer' as developer;
+
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:spendsense/core/config/environment.dart';
 import 'package:spendsense/core/theme/app_colors.dart';
 import 'package:spendsense/core/theme/app_theme.dart';
+import 'package:spendsense/core/widgets/validation_snackbar.dart';
 import 'package:spendsense/features/ai_assistant/application/ai_chat_providers.dart';
 import 'package:spendsense/core/theme/data_palette.dart';
 import 'package:spendsense/features/ai_assistant/domain/entities/ai_action.dart';
@@ -378,16 +381,24 @@ class _ProposalCard extends ConsumerStatefulWidget {
 class _ProposalCardState extends ConsumerState<_ProposalCard> {
   bool _busy = false;
 
-  Future<void> _confirm() async {
-    setState(() => _busy = true);
-    await ref.read(aiChatControllerProvider).confirmProposal(widget.message);
-    if (mounted) setState(() => _busy = false);
-  }
+  Future<void> _confirm() => _run(() => ref.read(aiChatControllerProvider).confirmProposal(widget.message));
 
-  Future<void> _dismiss() async {
+  Future<void> _dismiss() => _run(() => ref.read(aiChatControllerProvider).dismissProposal(widget.message));
+
+  /// Both actions write over the network now, so a failure has to reset the
+  /// button. Without the finally, one failed write left the card stuck
+  /// spinning with no message and no way to retry.
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
     setState(() => _busy = true);
-    await ref.read(aiChatControllerProvider).dismissProposal(widget.message);
-    if (mounted) setState(() => _busy = false);
+    try {
+      await action();
+    } catch (e, stackTrace) {
+      developer.log('Proposal action failed', error: e, stackTrace: stackTrace, name: 'Assistant');
+      if (mounted) showValidationSnackBar(context, "That didn't go through. Please try again.");
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override

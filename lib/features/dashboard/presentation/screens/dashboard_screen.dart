@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:spendsense/core/theme/app_colors.dart';
@@ -107,11 +108,13 @@ class DashboardScreen extends ConsumerWidget {
       // AppShell's own SafeArea already clears the floating nav bar.
       body: RefreshIndicator(
         onRefresh: () async {
-          ref.invalidate(walletListProvider);
-          ref.invalidate(transactionListProvider(null));
-          ref.invalidate(budgetListProvider);
-          ref.invalidate(recurringBillListProvider);
-          ref.invalidate(savingsGoalListProvider);
+          // Rebuilding the client is what actually re-reads the server:
+          // repositories cache their rows in memory, so invalidating the list
+          // providers alone just re-yielded the same cached data and the
+          // refresh did nothing at all. A new client means new repositories
+          // with empty caches, which forces a real fetch everywhere.
+          ref.invalidate(apiClientProvider);
+          await ref.read(transactionListProvider(null).future);
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),

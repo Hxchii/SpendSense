@@ -18,13 +18,17 @@ Route::get('/health', fn () => response()->json([
     'service' => 'spendsense-api',
 ]));
 
-Route::middleware(VerifyFirebaseToken::class)->prefix('v1')->group(function () {
+Route::middleware([VerifyFirebaseToken::class, 'throttle:120,1'])->prefix('v1')->group(function () {
     Route::post('/bootstrap', [BootstrapController::class, 'store']);
 
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::put('/profile', [ProfileController::class, 'update']);
 
-    Route::post('/ai/generate', [AiController::class, 'generate']);
+    // Far tighter than the rest: this one spends the owner's Gemini quota,
+    // and anyone can mint an anonymous account, so an unlimited endpoint is
+    // an open invitation to run up the bill. Twenty a minute is well above
+    // what scanning receipts and chatting actually needs.
+    Route::post('/ai/generate', [AiController::class, 'generate'])->middleware('throttle:20,1');
 
     // Generic per-collection CRUD. The client generates document ids, so
     // create and update are the same idempotent PUT.

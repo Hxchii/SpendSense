@@ -11,10 +11,10 @@ import 'package:spendsense/features/profile_settings/application/user_profile_pr
 import 'package:spendsense/features/receipts/application/receipt_providers.dart';
 import 'package:spendsense/features/receipts/domain/entities/receipt.dart';
 
-/// A Firestore write only resolves once the SERVER acknowledges it, which
+/// A write only resolves once the server acknowledges it. There is no local
 /// offline never happens — but the change is already durable in the local
 /// cache and syncs later, so past this point the delete counts as done.
-const _writeTimeout = Duration(seconds: 5);
+const _writeTimeout = Duration(seconds: 75);
 
 class ReceiptDetailScreen extends ConsumerStatefulWidget {
   const ReceiptDetailScreen({super.key, required this.receipt});
@@ -37,7 +37,7 @@ class _ReceiptDetailScreenState extends ConsumerState<ReceiptDetailScreen> {
       if (mounted) context.pop();
     } on TimeoutException {
       if (mounted) {
-        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        showValidationSnackBar(context, 'Still deleting — this is taking longer than usual.');
         context.pop();
       }
     } catch (e, stackTrace) {

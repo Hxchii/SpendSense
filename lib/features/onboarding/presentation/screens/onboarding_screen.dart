@@ -17,10 +17,10 @@ import 'package:spendsense/features/profile_settings/domain/entities/user_profil
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
 
-/// A Firestore write only resolves once the SERVER acknowledges it, which
-/// offline never happens — but the record is already durable in the local
-/// cache and syncs later, so past this point setup counts as done.
-const _writeTimeout = Duration(seconds: 5);
+/// Long enough to cover a suspended free-tier server waking up. The profile
+/// write is what routes the user out of onboarding, so giving up early left
+/// them staring at a screen that had, in fact, worked.
+const _writeTimeout = Duration(seconds: 75);
 
 /// A blank money field legitimately means "not set", but the `[0-9.]`
 /// formatter still lets a typo like "1.2.3" through — that must never be
@@ -97,10 +97,43 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       }
     }
     if (_page == _lastPage) {
-      _finish();
+      _finishGuarded();
       return;
     }
     _pageController.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+  }
+
+  /// A lock is only ever stored once we know it can actually be satisfied.
+  /// The lock screen is the sole way back into the app and offers no reset,
+  /// so saving a PIN that was never set — or biometrics on a device with none
+  /// enrolled — locks the user out of their own account permanently.
+  Future<void> _finishGuarded() async {
+    if (_lockType == AppLockType.pin && _pinController.text.trim().length < 4) {
+      showValidationSnackBar(context, 'Enter a PIN of at least 4 digits, or choose None.');
+      return;
+    }
+
+    if (_lockType == AppLockType.biometric) {
+      final auth = ref.read(localAuthProvider);
+      var available = false;
+      try {
+        available = (await auth.canCheckBiometrics || await auth.isDeviceSupported()) &&
+            (await auth.getAvailableBiometrics()).isNotEmpty;
+      } catch (_) {
+        available = false;
+      }
+      if (!available) {
+        if (mounted) {
+          showValidationSnackBar(
+            context,
+            'No fingerprint or face unlock is set up on this device. Set one up first, or choose PIN or None.',
+          );
+        }
+        return;
+      }
+    }
+
+    await _finish();
   }
 
   void _back() {
@@ -160,16 +193,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         await pinStore.savePin(_pinController.text.trim());
       }
 
-      // Remembered across retries: if a later step fails and the user taps
-      // Get Started again, a brand-new account must not end up with two
-      // wallets.
+      // Set only after the write is actually confirmed. Recording the attempt
+      // instead meant a retry skipped wallet creation entirely, leaving the
+      // account onboarded with no wallet and the balance the user typed
+      // silently discarded.
+      //
+      // Deliberately not time-limited: the wallet is the one thing the app is
+      // unusable without, so it is worth waiting for a slow server rather
+      // than proceeding as if it had been created.
       if (!_walletCreated) {
-        await _queuedWrite(() => walletRepo.create(WalletDraft(
-              name: _walletNameController.text.trim(),
-              type: _walletType,
-              startingBalance: _parseMoney(_walletBalanceController.text) ?? Money.zero,
-              colorHex: '#2a78d6',
-            )));
+        await walletRepo.create(WalletDraft(
+          name: _walletNameController.text.trim(),
+          type: _walletType,
+          startingBalance: _parseMoney(_walletBalanceController.text) ?? Money.zero,
+          colorHex: '#2a78d6',
+        ));
         _walletCreated = true;
       }
 

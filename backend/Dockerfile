@@ -51,7 +51,15 @@ RUN mkdir -p storage/framework/cache \
     && chmod -R 777 storage bootstrap/cache \
     && composer dump-autoload --optimize --no-dev --no-scripts
 
+# The built-in server handles ONE request at a time by default, so a single
+# 90-second receipt scan would block every other user for its full duration.
+# Extra workers require --no-reload, which is correct here anyway: nothing
+# edits the code inside a running container.
+ENV PHP_CLI_SERVER_WORKERS=8
+
 # The host assigns the port and it is not fixed between deploys, so it is read
-# at start rather than baked in.
-CMD php artisan config:clear \
-    && php artisan serve --host=0.0.0.0 --port=${PORT:-8000}
+# at start rather than baked in. Config and routes are cached because without
+# it every request re-parses all config and re-registers every provider.
+CMD php artisan config:cache \
+    && php artisan route:cache \
+    && php artisan serve --host=0.0.0.0 --port=${PORT:-8000} --no-reload

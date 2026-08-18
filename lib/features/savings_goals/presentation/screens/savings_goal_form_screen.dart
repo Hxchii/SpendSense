@@ -16,10 +16,10 @@ import 'package:spendsense/features/savings_goals/domain/entities/savings_goal.d
 import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
 
-/// A Firestore write only resolves once the SERVER acknowledges it, which
-/// offline never happens — but the record is already durable in the local
-/// cache and syncs later, so past this point the save counts as done.
-const _writeTimeout = Duration(seconds: 5);
+/// A write only resolves once the server acknowledges it. There is no local
+/// write queue behind this any more, so a timeout means "still in flight",
+/// not "safely stored" — sized to cover a suspended host waking up.
+const _writeTimeout = Duration(seconds: 75);
 
 class SavingsGoalFormScreen extends ConsumerStatefulWidget {
   const SavingsGoalFormScreen({super.key, this.goal});
@@ -134,7 +134,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
       if (mounted) context.pop();
     } on TimeoutException {
       if (mounted) {
-        showValidationSnackBar(context, "Saved. It will sync when you're back online.");
+        showValidationSnackBar(context, 'Still saving — this is taking longer than usual.');
         context.pop();
       }
     } catch (e, stackTrace) {
@@ -154,7 +154,7 @@ class _SavingsGoalFormScreenState extends ConsumerState<SavingsGoalFormScreen> {
       if (mounted) context.pop();
     } on TimeoutException {
       if (mounted) {
-        showValidationSnackBar(context, "Deleted. It will sync when you're back online.");
+        showValidationSnackBar(context, 'Still deleting — this is taking longer than usual.');
         context.pop();
       }
     } catch (e, stackTrace) {
