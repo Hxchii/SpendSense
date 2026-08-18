@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:spendsense/core/api/api_base_url.dart';
 import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/firebase/account_bootstrap.dart';
+import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
 
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) => FirebaseAuth.instance);
 final firestoreProvider = Provider<FirebaseFirestore>((ref) => FirebaseFirestore.instance);
@@ -55,4 +56,10 @@ final appSessionProvider = FutureProvider<void>((ref) async {
   await loadSavedApiBaseUrl(ref);
   await ref.watch(ensureSignedInProvider.future);
   await bootstrapAccount(client: ref.read(apiClientProvider));
+
+  // The router decides between onboarding, the lock screen and the dashboard
+  // from the profile, so it has to exist before any of that runs — otherwise
+  // a first launch renders as though the user had neither onboarded nor a
+  // lock configured.
+  await ref.read(userProfileRepositoryProvider).watch().first;
 });

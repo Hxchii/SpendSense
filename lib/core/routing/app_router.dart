@@ -51,11 +51,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final profile = ref.read(userProfileProvider).valueOrNull;
       final loc = state.matchedLocation;
 
-      // Until the profile is known we can't tell whether a lock applies, so
-      // fail closed and hold on the lock screen rather than briefly rendering
-      // the dashboard (balances and all) to someone who hasn't authenticated.
+      // The profile is unknown only while it is still loading or after the
+      // request failed. Never route to the lock screen on that basis: the lock
+      // screen has no way out while the profile stays unknown, which would
+      // strand the user outside their own app with no recovery. Startup
+      // already waits for the profile (see appSessionProvider), so reaching
+      // here means something went wrong, and the screens' own error states
+      // explain it far better than a lock screen can.
       if (profile == null) {
-        return ref.read(appUnlockedProvider) || loc == '/lock' ? null : '/lock';
+        return loc == '/lock' ? '/' : null;
       }
       if (!profile.onboardingComplete) {
         return loc.startsWith('/onboarding') ? null : '/onboarding';

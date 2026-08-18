@@ -36,7 +36,11 @@ class ApiClient {
   final FirebaseAuth auth;
   final http.Client _http;
 
-  static const _timeout = Duration(seconds: 20);
+  /// Generous because a free-tier host suspends an idle service and takes
+  /// most of a minute to wake — a shorter timeout means the first request
+  /// after any quiet period always fails, which reads as the app being
+  /// broken rather than merely slow.
+  static const _timeout = Duration(seconds: 75);
 
   Uri _uri(String path) => Uri.parse('$baseUrl/api/v1$path');
 
