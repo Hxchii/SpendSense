@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/seed/seed_ids.dart';
 import 'package:spendsense/core/services/notification_service.dart';
 import 'package:spendsense/core/utils/id.dart';
@@ -10,7 +10,7 @@ import 'package:spendsense/features/categories/domain/entities/category.dart';
 import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
 import 'package:spendsense/features/reminders/application/reminder_providers.dart';
 import 'package:spendsense/features/reminders/domain/entities/reminder.dart';
-import 'package:spendsense/features/savings_goals/data/firestore/firestore_savings_goal_repository.dart';
+import 'package:spendsense/features/savings_goals/data/api/api_savings_goal_repository.dart';
 import 'package:spendsense/features/savings_goals/domain/entities/savings_goal.dart';
 import 'package:spendsense/features/savings_goals/domain/repositories/savings_goal_repository.dart';
 import 'package:spendsense/features/transactions/application/transaction_providers.dart';
@@ -19,7 +19,7 @@ import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 
 /// THE swap point for the savings goals domain.
 final savingsGoalRepositoryProvider = Provider<SavingsGoalRepository>((ref) {
-  return FirestoreSavingsGoalRepository(firestore: ref.watch(firestoreProvider), uid: ref.watch(requireUidProvider));
+  return ApiSavingsGoalRepository(client: ref.watch(apiClientProvider));
 });
 
 final savingsGoalListProvider = StreamProvider.autoDispose<List<SavingsGoal>>((ref) {

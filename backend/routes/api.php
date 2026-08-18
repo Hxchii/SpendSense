@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AiController;
+use App\Http\Controllers\Api\BootstrapController;
 use App\Http\Controllers\Api\CollectionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Middleware\VerifyFirebaseToken;
@@ -18,6 +19,8 @@ Route::get('/health', fn () => response()->json([
 ]));
 
 Route::middleware(VerifyFirebaseToken::class)->prefix('v1')->group(function () {
+    Route::post('/bootstrap', [BootstrapController::class, 'store']);
+
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::put('/profile', [ProfileController::class, 'update']);
 

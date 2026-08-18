@@ -8,6 +8,7 @@ use Firebase\JWT\Key;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -34,9 +35,22 @@ class VerifyFirebaseToken
 
         $projectId = (string) config('firebase.project_id');
 
+        // Fetched outside the decode try/catch: a failure to load Google's
+        // certificates is a server problem, and reporting it as a bad token
+        // sends the client off chasing its own credentials instead.
         try {
-            $claims = JWT::decode($token, $this->keys());
+            $keys = $this->keys();
         } catch (Throwable $e) {
+            Log::error('Could not load Firebase signing certificates', ['exception' => $e->getMessage()]);
+
+            return response()->json(['message' => 'Could not verify credentials right now.'], 503);
+        }
+
+        try {
+            $claims = JWT::decode($token, $keys);
+        } catch (Throwable $e) {
+            Log::debug('Rejected an ID token', ['reason' => $e->getMessage()]);
+
             return response()->json(['message' => 'Invalid or expired token.'], 401);
         }
 

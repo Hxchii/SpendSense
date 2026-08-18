@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/firebase/account_bootstrap.dart';
 
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) => FirebaseAuth.instance);
@@ -44,10 +45,10 @@ final ensureSignedInProvider = FutureProvider<User>((ref) async {
   return credential.user!;
 });
 
-/// Signs in, then writes the default categories for a brand-new account.
+/// Signs in, then has the API set up the account's default categories.
 /// The whole UI waits on this, so by the time any screen builds there is
 /// both a uid and a usable category list.
 final appSessionProvider = FutureProvider<void>((ref) async {
-  final user = await ref.watch(ensureSignedInProvider.future);
-  await bootstrapAccount(firestore: ref.watch(firestoreProvider), uid: user.uid);
+  await ref.watch(ensureSignedInProvider.future);
+  await bootstrapAccount(client: ref.watch(apiClientProvider));
 });

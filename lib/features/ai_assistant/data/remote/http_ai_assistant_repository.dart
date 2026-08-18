@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/utils/money.dart';
 import 'package:spendsense/features/ai_assistant/domain/entities/ai_action.dart';
 import 'package:spendsense/features/ai_assistant/domain/entities/ai_chat_message.dart';
@@ -10,24 +10,14 @@ import 'package:spendsense/features/recurring_bills/domain/entities/recurring_bi
 import 'package:spendsense/features/transactions/domain/entities/transaction.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
 
-/// Calls Gemini directly from the client — a stand-in for the Laravel proxy
-/// planned for Phase 6. The API key is passed in via --dart-define, never
-/// hardcoded; swapping this out for an HTTP call to the real backend later
-/// is a one-line change at the provider binding, not here.
+/// Reaches Gemini through the SpendSense API rather than calling Google
+/// directly, so the API key stays on the server instead of shipping inside
+/// the APK where it can be extracted. The prompt and tool schemas stay here,
+/// with the backend acting purely as transport.
 class HttpAiAssistantRepository implements AiAssistantRepository {
-  HttpAiAssistantRepository({required this.apiKey, http.Client? client}) : _client = client ?? http.Client();
+  HttpAiAssistantRepository({required ApiClient client}) : _api = client;
 
-  final String apiKey;
-  final http.Client _client;
-
-  // Pinned deliberately (not the "-latest" alias) — this is the specific
-  // model verified in the AI Studio rate-limit dashboard to have a 500/day
-  // free-tier quota, versus 20/day on the full Flash model. The "-latest"
-  // alias resolves to a different, unverified-quota model, which would
-  // defeat the point. If Google deprecates this one, it'll surface as a
-  // clear 404 (as gemini-2.5-flash did) rather than fail silently.
-  static const _model = 'gemini-3.1-flash-lite';
-  static const _endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent';
+  final ApiClient _api;
 
   @override
   Future<AiChatResponse> ask({
@@ -105,25 +95,17 @@ class HttpAiAssistantRepository implements AiAssistantRepository {
     // Gemini's hosted models occasionally return transient 429/5xx under
     // load; one short retry clears most of them without the user noticing.
     for (var attempt = 0; attempt < 2; attempt++) {
-      http.Response response;
       try {
-        response = await _client
-            .post(Uri.parse('$_endpoint?key=$apiKey'), headers: {'Content-Type': 'application/json'}, body: body)
-            .timeout(const Duration(seconds: 20));
-      } catch (e) {
-        throw const AiAssistantException('No internet connection. Please check your connection and try again.');
+        final decoded = await _api.post('/ai/generate', jsonDecode(body) as Map<String, dynamic>);
+        return decoded as Map<String, dynamic>;
+      } on ApiException catch (e) {
+        final transient = e.statusCode == 429 || (e.statusCode ?? 0) >= 500;
+        if (transient && attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 900));
+          continue;
+        }
+        throw AiAssistantException(_friendlyErrorFor(e.statusCode ?? 0));
       }
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
-      }
-
-      final transient = response.statusCode == 429 || response.statusCode >= 500;
-      if (transient && attempt == 0) {
-        await Future.delayed(const Duration(milliseconds: 900));
-        continue;
-      }
-      throw AiAssistantException(_friendlyErrorFor(response.statusCode));
     }
     throw const AiAssistantException('The assistant is not working right now. Please try again in a moment.');
   }

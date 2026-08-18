@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/services/notification_service.dart';
 import 'package:spendsense/core/utils/iterable_extensions.dart';
 import 'package:spendsense/core/utils/money.dart';
 import 'package:spendsense/features/categories/application/category_providers.dart';
 import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
-import 'package:spendsense/features/budgets/data/firestore/firestore_budget_repository.dart';
+import 'package:spendsense/features/budgets/data/api/api_budget_repository.dart';
 import 'package:spendsense/features/budgets/domain/entities/budget.dart';
 import 'package:spendsense/features/budgets/domain/repositories/budget_repository.dart';
 import 'package:spendsense/features/transactions/application/transaction_providers.dart';
@@ -13,7 +13,7 @@ import 'package:spendsense/features/transactions/domain/entities/transaction.dar
 
 /// THE swap point for the budgets domain.
 final budgetRepositoryProvider = Provider<BudgetRepository>((ref) {
-  return FirestoreBudgetRepository(firestore: ref.watch(firestoreProvider), uid: ref.watch(requireUidProvider));
+  return ApiBudgetRepository(client: ref.watch(apiClientProvider));
 });
 
 final budgetListProvider = StreamProvider.autoDispose<List<Budget>>((ref) {

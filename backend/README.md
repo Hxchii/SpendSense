@@ -1,58 +1,149 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# SpendSense API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Laravel backend for the SpendSense Flutter app. The app talks only to this
+API; this API talks to Cloud Firestore.
 
-## About Laravel
-
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+Flutter app  ──►  Laravel API  ──►  Firestore
+                       └──────────►  Gemini
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Why it's built this way
 
-## Contributing
+**Firestore over REST, not the official SDK.** Google's `google/cloud-firestore`
+package talks gRPC, which needs a compiled PHP extension that is painful to
+install on Windows. Firestore exposes every operation this app needs over
+plain HTTPS, so `App\Services\FirestoreClient` uses that instead, with
+`google/auth` (pure PHP) exchanging the service account for an access token.
+No extensions to compile.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+**Auth is verified locally.** The app sends its Firebase ID token as
+`Authorization: Bearer <token>`. `VerifyFirebaseToken` checks the signature
+against Google's published certificates (cached for a day), then checks the
+audience and issuer so a token minted for a different Firebase project is
+rejected. The account comes from the token's signature-checked subject and
+**never from a URL**, so there is no path for one client to read another
+account's data.
 
-## Code of Conduct
+**One generic collection endpoint.** The Flutter client stores every domain
+through a single generic `FirestoreCollection<T>`, with document shape known
+only to that feature's repository. The backend mirrors that rather than
+defining nine near-identical controllers, so adding a field to an entity
+needs no backend change at all.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+**Gemini is proxied.** The key used to ship inside the APK, where anyone can
+unzip and read it. It now lives only in this server's `.env`.
 
-## Security Vulnerabilities
+## Setup
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### 1. Requirements
 
-## License
+PHP 8.3+ with `curl`, `mbstring`, `openssl` and `fileinfo` enabled, plus
+Composer. On Windows, a fresh PHP install also needs a CA bundle or every
+outbound HTTPS call fails with `cURL error 60`:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```ini
+; php.ini
+extension_dir = "C:\path\to\php\ext"
+curl.cainfo = "C:\path\to\php\extras\cacert.pem"   ; from https://curl.se/ca/cacert.pem
+openssl.cafile = "C:\path\to\php\extras\cacert.pem"
+```
+
+### 2. Install
+
+```bash
+cd backend
+composer install
+cp .env.example .env
+php artisan key:generate
+```
+
+### 3. Configure
+
+In `.env`:
+
+```
+FIREBASE_PROJECT_ID=spendsense-dca63
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-3.1-flash-lite
+```
+
+### 4. Service account
+
+Firebase Console → ⚙️ Project settings → **Service accounts** →
+**Generate new private key**. Save it as:
+
+```
+backend/storage/app/firebase/service-account.json
+```
+
+**This file is a real secret** — it grants full admin access to Firestore and
+bypasses security rules. It is gitignored. Never commit or share it.
+(`google-services.json` in the Flutter app is *not* a secret; this one is.)
+
+### 5. Verify
+
+```bash
+php artisan firestore:smoke
+```
+
+Round-trips a throwaway document and asserts money stays an integer, booleans
+stay booleans, nulls stay null, and nested receipt items survive. If this
+passes, credentials and wire-format translation are both working.
+
+### 6. Run
+
+```bash
+php artisan serve --host=0.0.0.0 --port=8000
+```
+
+`--host=0.0.0.0` matters: the default binds localhost only, which a phone
+cannot reach.
+
+## Endpoints
+
+All under `/api/v1`, all requiring `Authorization: Bearer <firebase-id-token>`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Liveness check (no auth) |
+| POST | `/bootstrap` | Create any missing default categories |
+| GET / PUT | `/profile` | User profile |
+| GET | `/{collection}` | List |
+| GET | `/{collection}/{id}` | Read one |
+| PUT | `/{collection}/{id}` | Create or replace |
+| DELETE | `/{collection}/{id}` | Delete |
+| POST | `/ai/generate` | Gemini proxy |
+
+Collections: `wallets`, `transactions`, `categories`, `budgets`,
+`savings_goals`, `recurring_bills`, `receipts`, `reminders`, `ai_chat`.
+Anything else is rejected.
+
+`PUT` is create-or-replace because the client generates document ids (UUIDs)
+before it ever calls, which also makes a retry after a dropped connection
+safe. Replacement is deliberately full, not a merge: the app treats "field is
+null" as real state for its undo and auto-contribute flows, so a cleared
+field has to actually clear.
+
+## Troubleshooting
+
+**`cURL error 60` / `Could not verify credentials right now`** — no CA bundle;
+see step 1. If you fixed `php.ini` while the server was running, restart it:
+PHP reads its config at startup.
+
+**`Invalid or expired token`** — the token is genuinely bad. Diagnose with:
+
+```bash
+php artisan firebase:verify-token <token>
+```
+
+which reports the audience, issuer, expiry and signature result individually
+rather than a single 401.
+
+**`Firebase service account not found`** — step 4, or the path in
+`FIREBASE_CREDENTIALS` is wrong. Leave that variable blank to use the default
+location.
+
+**Phone can't connect** — the app must point at your machine's LAN IP, not
+`localhost`, both devices must be on the same network, and Windows Firewall
+must allow inbound TCP 8000. See the root README.

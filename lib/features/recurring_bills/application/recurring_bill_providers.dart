@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/services/notification_service.dart';
 import 'package:spendsense/core/utils/iterable_extensions.dart';
 import 'package:spendsense/features/profile_settings/application/user_profile_providers.dart';
-import 'package:spendsense/features/recurring_bills/data/firestore/firestore_recurring_bill_repository.dart';
+import 'package:spendsense/features/recurring_bills/data/api/api_recurring_bill_repository.dart';
 import 'package:spendsense/features/recurring_bills/domain/entities/recurring_bill.dart';
 import 'package:spendsense/features/recurring_bills/domain/repositories/recurring_bill_repository.dart';
 import 'package:spendsense/features/transactions/application/transaction_providers.dart';
@@ -12,7 +12,7 @@ import 'package:spendsense/features/wallets/application/wallet_providers.dart';
 
 /// THE swap point for the recurring bills domain.
 final recurringBillRepositoryProvider = Provider<RecurringBillRepository>((ref) {
-  return FirestoreRecurringBillRepository(firestore: ref.watch(firestoreProvider), uid: ref.watch(requireUidProvider));
+  return ApiRecurringBillRepository(client: ref.watch(apiClientProvider));
 });
 
 final recurringBillListProvider = StreamProvider.autoDispose<List<RecurringBill>>((ref) {

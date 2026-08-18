@@ -1,10 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spendsense/core/config/environment.dart';
-import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/utils/id.dart';
 import 'package:spendsense/core/utils/iterable_extensions.dart';
 import 'package:spendsense/features/ai_assistant/application/financial_snapshot_provider.dart';
-import 'package:spendsense/features/ai_assistant/data/firestore/firestore_ai_chat_repository.dart';
+import 'package:spendsense/features/ai_assistant/data/api/api_ai_chat_repository.dart';
 import 'package:spendsense/features/ai_assistant/data/remote/http_ai_assistant_repository.dart';
 import 'package:spendsense/features/ai_assistant/domain/entities/ai_action.dart';
 import 'package:spendsense/features/ai_assistant/domain/entities/ai_chat_message.dart';
@@ -25,13 +24,13 @@ import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
 
 /// THE swap point for locally-saved chat history.
 final aiChatRepositoryProvider = Provider<AiChatRepository>((ref) {
-  return FirestoreAiChatRepository(firestore: ref.watch(firestoreProvider), uid: ref.watch(requireUidProvider));
+  return ApiAiChatRepository(client: ref.watch(apiClientProvider));
 });
 
-/// THE swap point for the AI call. Later this becomes an HTTP call to the
-/// Laravel backend instead (Phase 6) — still a one-line change here.
+/// THE swap point for the AI call — now routed through the Laravel API, which
+/// holds the Gemini key server-side.
 final aiAssistantRepositoryProvider = Provider<AiAssistantRepository>((ref) {
-  return HttpAiAssistantRepository(apiKey: Environment.geminiApiKey);
+  return HttpAiAssistantRepository(client: ref.watch(apiClientProvider));
 });
 
 final aiChatHistoryProvider = StreamProvider.autoDispose<List<AiChatMessage>>((ref) {

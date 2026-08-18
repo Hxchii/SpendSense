@@ -1,14 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:spendsense/core/firebase/firebase_providers.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/utils/money.dart';
 import 'package:spendsense/features/transactions/application/transaction_providers.dart';
-import 'package:spendsense/features/wallets/data/firestore/firestore_wallet_repository.dart';
+import 'package:spendsense/features/wallets/data/api/api_wallet_repository.dart';
 import 'package:spendsense/features/wallets/domain/entities/wallet.dart';
 import 'package:spendsense/features/wallets/domain/repositories/wallet_repository.dart';
 
 /// THE swap point for the wallets domain.
 final walletRepositoryProvider = Provider<WalletRepository>((ref) {
-  return FirestoreWalletRepository(firestore: ref.watch(firestoreProvider), uid: ref.watch(requireUidProvider));
+  return ApiWalletRepository(client: ref.watch(apiClientProvider));
 });
 
 final walletListProvider = StreamProvider.autoDispose<List<Wallet>>((ref) {

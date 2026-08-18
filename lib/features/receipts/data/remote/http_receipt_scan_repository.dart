@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
 
-import 'package:http/http.dart' as http;
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/seed/seed_ids.dart';
 import 'package:spendsense/core/utils/money.dart';
 import 'package:spendsense/features/categories/domain/entities/category.dart';
@@ -18,17 +18,14 @@ class ReceiptScanException implements Exception {
 }
 
 /// Reads a receipt photo with Gemini vision and returns structured data.
-/// Mirrors HttpAiAssistantRepository: calls Gemini directly with a
-/// --dart-define key for now, to be swapped for the Laravel proxy in Phase 6.
+/// Mirrors HttpAiAssistantRepository: the call goes through the SpendSense
+/// API so the Gemini key stays on the server rather than inside the APK.
 class HttpReceiptScanRepository implements ReceiptScanRepository {
   HttpReceiptScanRepository({
-    required this.apiKey,
+    required ApiClient client,
     required this.loadCategories,
     required this.loadReceipts,
-    http.Client? client,
-  }) : _client = client ?? http.Client();
-
-  final String apiKey;
+  }) : _api = client;
 
   /// Resolved per scan so the model can only ever suggest a category id that
   /// actually exists right now, rather than inventing one.
@@ -37,10 +34,7 @@ class HttpReceiptScanRepository implements ReceiptScanRepository {
   /// Used for local duplicate detection — the model never sees these.
   final Future<List<Receipt>> Function() loadReceipts;
 
-  final http.Client _client;
-
-  static const _model = 'gemini-3.1-flash-lite';
-  static const _endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent';
+  final ApiClient _api;
 
   @override
   Future<ReceiptScanResult> scan(String imagePath) async {
@@ -277,28 +271,19 @@ Choose the category that best matches what was actually bought. If nothing fits,
 
   Future<Map<String, dynamic>> _postWithRetry(String body) async {
     for (var attempt = 0; attempt < 2; attempt++) {
-      http.Response response;
       try {
-        response = await _client
-            .post(Uri.parse('$_endpoint?key=$apiKey'), headers: {'Content-Type': 'application/json'}, body: body)
-            // Vision calls carry an image payload, so they need longer than
-            // the text assistant's 20s.
-            .timeout(const Duration(seconds: 45));
-      } catch (e) {
-        throw const ReceiptScanException('No internet connection. Please check your connection and try again.');
+        final decoded = await _api.post('/ai/generate', jsonDecode(body) as Map<String, dynamic>);
+        return decoded as Map<String, dynamic>;
+      } on ApiException catch (e) {
+        final status = e.statusCode ?? 0;
+        final transient = status == 429 || status >= 500;
+        if (transient && attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 900));
+          continue;
+        }
+        developer.log('Receipt scan failed (${e.statusCode}): ${e.message}', name: 'ReceiptScan');
+        throw ReceiptScanException(_friendlyErrorFor(status));
       }
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
-      }
-
-      final transient = response.statusCode == 429 || response.statusCode >= 500;
-      if (transient && attempt == 0) {
-        await Future.delayed(const Duration(milliseconds: 900));
-        continue;
-      }
-      developer.log('Gemini vision error ${response.statusCode}: ${response.body}', name: 'ReceiptScan');
-      throw ReceiptScanException(_friendlyErrorFor(response.statusCode));
     }
     throw const ReceiptScanException('The scanner is not working right now. Please try again in a moment.');
   }
