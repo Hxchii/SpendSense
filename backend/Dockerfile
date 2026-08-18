@@ -3,7 +3,9 @@
 # Debian-based rather than Alpine: PHP extensions compile against glibc
 # reliably, where musl needs per-extension workarounds. The image is larger,
 # but build failures cost far more than disk here.
-FROM php:8.3-cli
+# 8.4 specifically: composer.lock resolved Symfony 8.1, which requires
+# PHP >= 8.4.1. An older image cannot install the locked versions at all.
+FROM php:8.4-cli
 
 # Only what is actually needed: zip for Composer, mbstring for Laravel's
 # string handling. Everything else Laravel requires is already compiled into

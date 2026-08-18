@@ -38,8 +38,9 @@ unzip and read it. It now lives only in this server's `.env`.
 
 ### 1. Requirements
 
-PHP 8.3+ with `curl`, `mbstring`, `openssl` and `fileinfo` enabled, plus
-Composer. On Windows, a fresh PHP install also needs a CA bundle or every
+PHP **8.4+** with `curl`, `mbstring`, `openssl` and `fileinfo` enabled, plus
+Composer. (8.4 specifically: the locked Symfony 8.1 packages require
+`>= 8.4.1`, so 8.3 cannot install this lockfile.) On Windows, a fresh PHP install also needs a CA bundle or every
 outbound HTTPS call fails with `cURL error 60`:
 
 ```ini
