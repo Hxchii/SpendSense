@@ -50,7 +50,10 @@ class ApiCollection<T> {
 
   Future<List<T>> getAll() async {
     final response = await client.get('/$name');
-    final rows = (response is Map ? response['data'] : null) as List<dynamic>? ?? const [];
+    // Checked, not cast: an unexpected response shape should degrade to an
+    // empty list rather than throw out of the stream every screen watches.
+    final payload = response is Map ? response['data'] : null;
+    final rows = payload is List ? payload : const <dynamic>[];
     final items = rows.whereType<Map<String, dynamic>>().map(_parse).whereType<T>().toList();
     _cache = items;
     return items;
@@ -59,8 +62,8 @@ class ApiCollection<T> {
   Future<T?> getById(String id) async {
     try {
       final response = await client.get('/$name/$id');
-      final row = (response is Map ? response['data'] : null) as Map<String, dynamic>?;
-      return row == null ? null : _parse(row);
+      final row = response is Map ? response['data'] : null;
+      return row is Map<String, dynamic> ? _parse(row) : null;
     } on ApiException catch (e) {
       if (e.statusCode == 404) return null;
       rethrow;

@@ -78,7 +78,11 @@ class ApiUserProfileRepository implements UserProfileRepository {
   @override
   Future<UserProfile> get() async {
     final response = await _client.get('/profile');
-    final data = (response is Map ? response['data'] : null) as Map<String, dynamic>?;
+    // Checked rather than cast: an empty document can legitimately come back
+    // as [] instead of {}, and a hard cast there crashes startup outright
+    // rather than falling through to the defaults below.
+    final raw = response is Map ? response['data'] : null;
+    final data = raw is Map<String, dynamic> ? raw : null;
     // An empty object means no profile stored yet, i.e. a brand-new account:
     // a default profile has onboardingComplete false, which is what routes
     // the user to onboarding.

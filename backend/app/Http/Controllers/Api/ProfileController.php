@@ -23,7 +23,11 @@ class ProfileController extends Controller
         // A brand-new account has no profile document yet. Returning an empty
         // object rather than a 404 lets the client apply its own defaults
         // without treating first launch as an error.
-        return response()->json(['data' => $document ?? []]);
+        //
+        // stdClass, not []: PHP encodes an empty array as the JSON array [],
+        // which a typed client reading an object here fails to parse — so the
+        // very first launch of a new account would break.
+        return response()->json(['data' => $document ?: new \stdClass()]);
     }
 
     public function update(Request $request): JsonResponse
