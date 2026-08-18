@@ -17,6 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# This API has no relational database — Firestore is the store — but Laravel
+# defaults to keeping cache and sessions in one. Without these, caching
+# Google's signing certificates fails, which surfaces as every request being
+# rejected as unauthenticated.
+ENV CACHE_STORE=file \
+    SESSION_DRIVER=file \
+    QUEUE_CONNECTION=sync \
+    LOG_CHANNEL=stderr
+
 WORKDIR /app
 
 # Dependencies first so a code-only change doesn't reinstall the whole vendor
