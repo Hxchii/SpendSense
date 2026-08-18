@@ -63,7 +63,16 @@ class _ReceiptScanScreenState extends ConsumerState<ReceiptScanScreen> {
   }
 
   Future<void> _pickFromGallery() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    // Capped: a modern phone photo is several megabytes, and every one of
+    // those bytes is uploaded twice — to the API, then on to Gemini. 1600px
+    // is still far more than enough to read receipt text, and matches what
+    // the camera path already captures.
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (picked == null) return;
     await _runScan(picked.path);
   }

@@ -17,6 +17,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# The official images ship no php.ini, which leaves OPcache off for the CLI
+# server — every request would otherwise recompile every PHP file it touches.
+# It matters here because the free tier allots a fraction of a CPU.
+RUN { \
+      echo 'opcache.enable=1'; \
+      echo 'opcache.enable_cli=1'; \
+      echo 'opcache.memory_consumption=128'; \
+      echo 'opcache.max_accelerated_files=10000'; \
+      echo 'opcache.validate_timestamps=0'; \
+    } > /usr/local/etc/php/conf.d/opcache.ini \
+    && docker-php-ext-install -j"$(nproc)" opcache
+
 # This API has no relational database — Firestore is the store — but Laravel
 # defaults to keeping cache and sessions in one. Without these, caching
 # Google's signing certificates fails, which surfaces as every request being
