@@ -44,8 +44,8 @@ class ApiCollection<T> {
   /// snapshot, and some repositories sort what they receive in place — with a
   /// shared cache that would quietly reorder every other subscriber's data.
   Stream<List<T>> watch() async* {
-    yield [...(_cache ?? await getAll())];
-    yield* _controller.stream.map((items) => [...items]);
+    yield <T>[...(_cache ?? await getAll())];
+    yield* _controller.stream.map((items) => <T>[...items]);
   }
 
   Future<List<T>> getAll() async {
@@ -71,14 +71,14 @@ class ApiCollection<T> {
   /// UUIDs, matching how the rest of the app creates them.
   Future<void> put(String id, T value) async {
     await client.put('/$name/$id', _normalize(toJson(value)));
-    final next = [..._cache?.where((e) => idOf(e) != id) ?? const [], value];
+    final next = <T>[...?_cache?.where((e) => idOf(e) != id), value];
     _cache = next;
     _controller.add(next);
   }
 
   Future<void> delete(String id) async {
     await client.delete('/$name/$id');
-    final next = [...?_cache?.where((e) => idOf(e) != id)];
+    final next = <T>[...?_cache?.where((e) => idOf(e) != id)];
     _cache = next;
     _controller.add(next);
   }
