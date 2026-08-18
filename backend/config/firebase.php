@@ -18,6 +18,13 @@ return [
     'credentials' => env('FIREBASE_CREDENTIALS') ?: storage_path('app/firebase/service-account.json'),
 
     /*
+    | The same service account passed inline instead of as a file, for hosts
+    | where uploading one isn't an option. Raw JSON or base64-encoded JSON.
+    | Takes precedence over the file path above when set.
+    */
+    'credentials_json' => env('FIREBASE_CREDENTIALS_JSON', ''),
+
+    /*
     | Gemini is called from here rather than the app so the key never ships
     | inside an APK, where anyone can extract it.
     */

@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spendsense/core/api/api_base_url.dart';
+import 'package:spendsense/core/api/api_client.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:spendsense/core/services/notification_service.dart';
 import 'package:spendsense/core/theme/app_colors.dart';
@@ -109,6 +111,15 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _export(context, ref, asCsv: false),
           ),
           const Divider(),
+          const _SectionLabel('Server'),
+          ListTile(
+            leading: const Icon(LucideIcons.server),
+            title: const Text('API address'),
+            subtitle: Text(ref.watch(apiBaseUrlProvider)),
+            trailing: const Icon(LucideIcons.pencil, size: 18),
+            onTap: () => _editApiBaseUrl(context, ref),
+          ),
+          const Divider(),
           const _SectionLabel('Debug'),
           ListTile(
             leading: const Icon(LucideIcons.rotateCcw),
@@ -118,6 +129,60 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// Lets the server be repointed without rebuilding the app — the address
+  /// changes whenever the API is redeployed or the machine running it joins a
+  /// different network, and whoever is testing usually can't rebuild.
+  Future<void> _editApiBaseUrl(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController(text: ref.read(apiBaseUrlProvider));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('API address'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(hintText: 'https://your-api.example.com'),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Where SpendSense stores your data. Change this only if you were given a different address.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, '__reset__'), child: const Text('Reset')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (result == null) return;
+
+    if (result == '__reset__') {
+      await clearApiBaseUrl(ref.read(secureStorageProvider), ref.read(apiBaseUrlProvider.notifier));
+    } else {
+      final normalized = normalizeBaseUrl(result);
+      if (normalized.isEmpty) {
+        if (context.mounted) showValidationSnackBar(context, 'Enter an address, or tap Reset.');
+        return;
+      }
+      await saveApiBaseUrl(ref.read(secureStorageProvider), ref.read(apiBaseUrlProvider.notifier), normalized);
+    }
+
+    // Every repository holds a client built from the old address, so they all
+    // have to be rebuilt for the change to take effect.
+    ref.invalidate(apiClientProvider);
+    if (context.mounted) {
+      showValidationSnackBar(context, 'Server updated. Pull down on the dashboard to reload.');
+    }
   }
 
   Future<void> _editProfileDialog(BuildContext context, WidgetRef ref, UserProfile profile) async {

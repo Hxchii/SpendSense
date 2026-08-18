@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:spendsense/core/api/api_base_url.dart';
 import 'package:spendsense/core/api/api_client.dart';
 import 'package:spendsense/core/firebase/account_bootstrap.dart';
 
@@ -49,6 +50,9 @@ final ensureSignedInProvider = FutureProvider<User>((ref) async {
 /// The whole UI waits on this, so by the time any screen builds there is
 /// both a uid and a usable category list.
 final appSessionProvider = FutureProvider<void>((ref) async {
+  // Before anything talks to the API, so the first request already goes to
+  // whichever server the user last pointed the app at.
+  await loadSavedApiBaseUrl(ref);
   await ref.watch(ensureSignedInProvider.future);
-  await bootstrapAccount(client: ref.watch(apiClientProvider));
+  await bootstrapAccount(client: ref.read(apiClientProvider));
 });

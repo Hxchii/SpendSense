@@ -49,14 +49,9 @@ class FirestoreClient
             return $this->token;
         }
 
-        $path = (string) config('firebase.credentials');
-        if (! is_file($path)) {
-            throw new RuntimeException("Firebase service account not found at {$path}. See backend/README.md.");
-        }
-
         $credentials = CredentialsLoader::makeCredentials(
             'https://www.googleapis.com/auth/datastore',
-            json_decode(file_get_contents($path), true)
+            $this->serviceAccount()
         );
 
         $authToken = $credentials->fetchAuthToken(HttpHandlerFactory::build());
@@ -68,6 +63,48 @@ class FirestoreClient
         $this->tokenExpiresAt = time() + (int) ($authToken['expires_in'] ?? 3600);
 
         return $this->token;
+    }
+
+    /**
+     * The service account, from an environment variable if one is set and
+     * otherwise from a file on disk.
+     *
+     * Hosted environments generally have no way to commit or upload a file,
+     * so the whole JSON is passed as a variable there — base64 accepted
+     * because a raw private key spans multiple lines, which many dashboards
+     * mangle. Locally the file path stays the more convenient option.
+     *
+     * @return array<string, mixed>
+     */
+    private function serviceAccount(): array
+    {
+        $inline = trim((string) config('firebase.credentials_json'));
+        if ($inline !== '') {
+            $decoded = json_decode($inline, true);
+            if (! is_array($decoded)) {
+                $fromBase64 = base64_decode($inline, true);
+                $decoded = $fromBase64 === false ? null : json_decode($fromBase64, true);
+            }
+            if (! is_array($decoded)) {
+                throw new RuntimeException('FIREBASE_CREDENTIALS_JSON is set but is not valid JSON or base64-encoded JSON.');
+            }
+
+            return $decoded;
+        }
+
+        $path = (string) config('firebase.credentials');
+        if (! is_file($path)) {
+            throw new RuntimeException(
+                "No Firebase service account found. Set FIREBASE_CREDENTIALS_JSON, or place the file at {$path}. See backend/README.md."
+            );
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (! is_array($decoded)) {
+            throw new RuntimeException("Service account at {$path} is not valid JSON.");
+        }
+
+        return $decoded;
     }
 
     private function request()

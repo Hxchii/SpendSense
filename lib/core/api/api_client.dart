@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
-import 'package:spendsense/core/config/environment.dart';
+import 'package:spendsense/core/api/api_base_url.dart';
 
 /// Thrown when the API is unreachable or answers with an error, so callers can
 /// tell a real failure from an empty result.
@@ -103,5 +103,5 @@ class ApiClient {
 }
 
 final apiClientProvider = Provider<ApiClient>((ref) {
-  return ApiClient(baseUrl: Environment.apiBaseUrl, auth: FirebaseAuth.instance);
+  return ApiClient(baseUrl: ref.watch(apiBaseUrlProvider), auth: FirebaseAuth.instance);
 });
