@@ -3,7 +3,6 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:spendsense/core/config/environment.dart';
 import 'package:spendsense/core/theme/app_colors.dart';
 import 'package:spendsense/core/theme/app_theme.dart';
 import 'package:spendsense/core/widgets/validation_snackbar.dart';
@@ -56,7 +55,6 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
     final sending = ref.watch(aiChatSendingProvider);
     final reversed = history.reversed.toList();
     final suggestions = history.isNotEmpty && history.last.role == ChatRole.assistant ? history.last.suggestions : const <String>[];
-    final isLive = Environment.hasGeminiApiKey;
 
     return Scaffold(
       body: SafeArea(
@@ -80,7 +78,7 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
                       children: [
                         Text('Financial Assistant', style: Theme.of(context).textTheme.titleMedium),
                         Text(
-                          isLive ? 'Online' : 'Not configured',
+                          'Online',
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: colors.textMuted),
                         ),
                       ],

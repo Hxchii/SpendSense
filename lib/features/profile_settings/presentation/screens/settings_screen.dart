@@ -119,13 +119,6 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(LucideIcons.pencil, size: 18),
             onTap: () => _editApiBaseUrl(context, ref),
           ),
-          const Divider(),
-          const _SectionLabel('Debug'),
-          ListTile(
-            leading: const Icon(LucideIcons.rotateCcw),
-            title: const Text('Restart onboarding'),
-            onTap: () => updateProfile((p) => p.copyWith(onboardingComplete: false)),
-          ),
         ],
       ),
     );
