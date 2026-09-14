@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Custom color roles beyond Material's fixed ColorScheme slots. Deliberately
-/// monochrome-first (paper/ink) with a single confident accent — the accent
-/// is applied by hand only where it earns its place (nav, links, positive
-/// deltas), never smeared across every button/app bar the way a bare
-/// `ColorScheme.fromSeed` does.
+/// Custom color roles beyond Material's fixed ColorScheme slots.
 @immutable
 class AppColors extends ThemeExtension<AppColors> {
   const AppColors({
@@ -12,6 +8,8 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.ink,
     required this.brand,
     required this.brandSoft,
+    required this.gradientStart,
+    required this.gradientEnd,
     required this.textPrimary,
     required this.textSecondary,
     required this.textMuted,
@@ -23,6 +21,8 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color ink;
   final Color brand;
   final Color brandSoft;
+  final Color gradientStart;
+  final Color gradientEnd;
   final Color textPrimary;
   final Color textSecondary;
   final Color textMuted;
@@ -30,26 +30,30 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color hairline;
 
   static const light = AppColors(
-    paper: Color(0xFFFBF9F4),
-    ink: Color(0xFF171512),
-    brand: Color(0xFF1F6F54),
-    brandSoft: Color(0xFFDCEBE3),
-    textPrimary: Color(0xFF171512),
-    textSecondary: Color(0xFF6B6660),
-    textMuted: Color(0xFF9B958C),
-    surfaceMuted: Color(0xFFF1EEE6),
-    hairline: Color(0x14171512),
+    paper: Color(0xFFF7FBF2),
+    ink: Color(0xFF123A2A),
+    brand: Color(0xFF368F3B),
+    brandSoft: Color(0xFFDDF4C9),
+    gradientStart: Color(0xFF16763D),
+    gradientEnd: Color(0xFFA8F33F),
+    textPrimary: Color(0xFF123A2A),
+    textSecondary: Color(0xFF55705D),
+    textMuted: Color(0xFF829888),
+    surfaceMuted: Color(0xFFEBF5E4),
+    hairline: Color(0x1A123A2A),
   );
 
   static const dark = AppColors(
-    paper: Color(0xFF121110),
-    ink: Color(0xFFF5F3EE),
-    brand: Color(0xFF4FBE9A),
-    brandSoft: Color(0xFF1D362E),
-    textPrimary: Color(0xFFF5F3EE),
-    textSecondary: Color(0xFFA39D93),
-    textMuted: Color(0xFF726C63),
-    surfaceMuted: Color(0xFF221F1D),
+    paper: Color(0xFF0C1710),
+    ink: Color(0xFFF0F8E9),
+    brand: Color(0xFF9BEF49),
+    brandSoft: Color(0xFF1E3A25),
+    gradientStart: Color(0xFF0B472D),
+    gradientEnd: Color(0xFF76C936),
+    textPrimary: Color(0xFFF0F8E9),
+    textSecondary: Color(0xFFA8BDA8),
+    textMuted: Color(0xFF718674),
+    surfaceMuted: Color(0xFF14261A),
     hairline: Color(0x1FFFFFFF),
   );
 
@@ -59,6 +63,8 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? ink,
     Color? brand,
     Color? brandSoft,
+    Color? gradientStart,
+    Color? gradientEnd,
     Color? textPrimary,
     Color? textSecondary,
     Color? textMuted,
@@ -70,6 +76,8 @@ class AppColors extends ThemeExtension<AppColors> {
       ink: ink ?? this.ink,
       brand: brand ?? this.brand,
       brandSoft: brandSoft ?? this.brandSoft,
+      gradientStart: gradientStart ?? this.gradientStart,
+      gradientEnd: gradientEnd ?? this.gradientEnd,
       textPrimary: textPrimary ?? this.textPrimary,
       textSecondary: textSecondary ?? this.textSecondary,
       textMuted: textMuted ?? this.textMuted,
@@ -86,6 +94,8 @@ class AppColors extends ThemeExtension<AppColors> {
       ink: Color.lerp(ink, other.ink, t)!,
       brand: Color.lerp(brand, other.brand, t)!,
       brandSoft: Color.lerp(brandSoft, other.brandSoft, t)!,
+      gradientStart: Color.lerp(gradientStart, other.gradientStart, t)!,
+      gradientEnd: Color.lerp(gradientEnd, other.gradientEnd, t)!,
       textPrimary: Color.lerp(textPrimary, other.textPrimary, t)!,
       textSecondary: Color.lerp(textSecondary, other.textSecondary, t)!,
       textMuted: Color.lerp(textMuted, other.textMuted, t)!,

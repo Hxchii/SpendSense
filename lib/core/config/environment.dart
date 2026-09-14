@@ -13,12 +13,11 @@ class Environment {
 
   /// Base URL of the Laravel API, without a trailing slash.
   ///
-  /// `php artisan serve --host=0.0.0.0` binds the machine's LAN address, so a
-  /// phone on the same Wi-Fi reaches it at `http://<your-laptop-ip>:8000`.
-  /// 10.0.2.2 is how the Android emulator refers to the host machine.
+  /// The hosted Laravel API is the default; local development can still
+  /// override it with `--dart-define=API_BASE_URL=...`.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000',
+    defaultValue: 'https://spendsense-8h7o.onrender.com',
   );
 
   /// Gemini is called through the API so the key stays on the server instead

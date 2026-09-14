@@ -112,10 +112,17 @@ class _NavItem extends StatelessWidget {
             height: 38,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? colors.brandSoft : Colors.transparent,
+              gradient: selected
+                  ? LinearGradient(
+                      colors: [colors.gradientStart, colors.gradientEnd],
+                      begin: Alignment.bottomLeft,
+                      end: Alignment.topRight,
+                    )
+                  : null,
+              color: selected ? null : Colors.transparent,
               borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
-            child: Icon(destination.icon, size: 18, color: selected ? colors.brand : colors.textMuted),
+            child: Icon(destination.icon, size: 18, color: selected ? colors.ink : colors.textMuted),
           ),
         ),
       ),

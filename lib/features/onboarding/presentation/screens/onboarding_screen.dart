@@ -91,8 +91,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         showValidationSnackBar(context, 'Give your wallet a name so we know where money is coming from.');
         return;
       }
-      if (!_isUsableAmount(_walletBalanceController.text)) {
-        showValidationSnackBar(context, 'Enter a valid current balance.');
+      if (_walletBalanceController.text.trim().isEmpty || !_isUsableAmount(_walletBalanceController.text)) {
+        showValidationSnackBar(context, 'Enter the current balance. Use 0 if the wallet is empty.');
         return;
       }
     }
